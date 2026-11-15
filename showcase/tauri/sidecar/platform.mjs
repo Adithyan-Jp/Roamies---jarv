@@ -35,6 +35,12 @@ export const seesPointer = (platform, session) => platform !== 'linux' || sessio
  *  user binds keys to `roamies --summon`, `--talk` and the rest in the desktop's keyboard settings. */
 export const hasHotkeys = (platform, session) => platform !== 'linux' || session === 'x11';
 
+/** The pairs offered for the talk keys (held to talk), the default first: the setup guide's lists. On a PC no Win key
+ *  (letting go of it opens Start) and no Alt+Shift (it switches keyboard layout). */
+export const talkChords = (platform) => (platform === 'darwin'
+  ? [['control', 'option'], ['option', 'command'], ['control', 'command'], ['control', 'shift'], ['option', 'shift']]
+  : [['control', 'option'], ['control', 'shift']]);
+
 /** The pairs offered for the type-to-ask shortcut (a quick tap of two modifier keys), the default first. The setup
  *  guide's rule for the talk keys: on a PC no Win key (it opens Start) and no Alt+Shift (it switches keyboard layout). */
 export const writeChords = (platform) => (platform === 'darwin'
@@ -45,10 +51,20 @@ export const writeChords = (platform) => (platform === 'darwin'
 export const samePair = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === 2 && b.length === 2 && a.every((m) => b.includes(m)) && b.every((m) => a.includes(m));
 
 /** The type-to-ask pair in use: the saved one when it's on offer and isn't the talk pair, else the first on offer that
- *  isn't. So a config from before this shortcut, or a talk pair already set to its default, still gets one. */
+ *  isn't. So a config from before this shortcut, or a talk pair already set to its default, still gets one.
+ *  Saved as 'off': the tap is off, so null (it can clash with another app's shortcut, like Wispr Flow's). */
 export function writeChord(platform, talk, saved) {
+  if (saved === 'off') return null;
   const offered = writeChords(platform);
   return offered.find((c) => samePair(c, saved) && !samePair(c, talk)) ?? offered.find((c) => !samePair(c, talk)) ?? offered[0];
+}
+
+/** The voice helper's mic list ({"type":"mics"}), checked: up to 40 mics with a string id, names and ids cut short, and
+ *  the one automatic uses now (macOS: the built-in mic while the default is a Bluetooth headset). */
+export function cleanMics(m) {
+  const list = (Array.isArray(m?.list) ? m.list : []).filter((x) => typeof x?.id === 'string' && x.id)
+    .map((x) => ({ id: x.id.slice(0, 300), name: String(x.name || x.id).slice(0, 120) })).slice(0, 40);
+  return { list, auto: String(m?.auto || m?.default || '').slice(0, 300) };
 }
 
 /** Voice in: Apple's speech on macOS, Parakeet on the PC on Windows and Linux. */

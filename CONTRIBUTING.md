@@ -15,6 +15,9 @@ cd Roamies/showcase/tauri
 ./build.sh            # release bundle for this OS
 ```
 
+On Windows, run these in **Git Bash** (it comes with [Git for Windows](https://git-scm.com/download/win)), not PowerShell or
+Command Prompt: `build.sh` is a Bash script, and Windows PowerShell 5 doesn't accept `&&`.
+
 ## Before you open a pull request
 
 - Run `npm test` in `showcase/tauri/sidecar`.

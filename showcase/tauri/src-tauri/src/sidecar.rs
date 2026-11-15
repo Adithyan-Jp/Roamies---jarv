@@ -7,8 +7,9 @@ fn find_node() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("ROAMIES_NODE") {
         return Some(PathBuf::from(p));
     }
-    // The Node.js shipped inside the app (bundle.externalBin), so users don't need Node installed.
-    if let Some(p) = helper_binary("node") {
+    // The Node.js shipped inside the app (bundle.externalBin), so users don't need Node installed. Named roamies-node:
+    // a .deb installs it as /usr/bin/roamies-node, and /usr/bin/node belongs to the nodejs package (#67).
+    if let Some(p) = helper_binary("roamies-node") {
         return Some(p);
     }
     // GUI apps don't get the shell's PATH on macOS, so check the usual installs too.

@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createWebFetchTool, createWebSearchTool, runSideWebSearch, runSideWebSearchViaClaudeCode } from '@kenkaiiii/ggcoder/web';
 import { z } from 'zod';
-import { parseSipsSize, readProblem, rematch, sameBounds, shotFits, shotMap, shotProblem, snapRect, toScreen } from './pointing.mjs';
+import { parseSipsSize, readProblem, rematch, sameBounds, shotFits, shotMap, shotProblem, shotUnits, snapRect, toScreen } from './pointing.mjs';
 import { ASK, BLOCK, checkDrawAction, checkFetch, checkOpen, checkRead, checkWrite, classifyCommand, isRiskyClick, isYes, riskyKind } from './safety.mjs';
 import { CARDS, DrawArgs, LIMITS, checkDraw, createParts, createPhotos, describeParts, faviconFor, pickTextMatch, quizNote, resolveTargets } from './draw.mjs';
 import { plain } from './intro.mjs';
@@ -228,7 +228,7 @@ export function sideSearchFor(route) {
 // Every request and redirect hop of web_fetch goes through safety.mjs, by name and by the addresses it resolves to.
 export const guardFetch = async (url) => { const v = await checkFetch(url); return v.level === BLOCK ? `Blocked for safety: ${v.reason}` : null; };
 
-export function createTools({ allowActions, ui, ask, openUrl, onCommitments, focus = null, firedReminders = () => [], showList, fmtWhen, commitmentsText, userName, onPlan = () => {}, speak = () => false, onHandoff = () => {}, watchClicks = () => {}, onInkGone = () => {}, askShell = async () => ({ ok: false, error: 'Roamies isn\'t running.' }), workdir = HOME, own = null, sideSearch = async () => null }) {
+export function createTools({ allowActions, ui, ask, openUrl, onCommitments, focus = null, firedReminders = () => [], showList, fmtWhen, commitmentsText, userName, onPlan = () => {}, speak = () => false, onHandoff = () => {}, watchClicks = () => {}, onInkGone = () => {}, askShell = async () => ({ ok: false, error: 'Roamies isn\'t running.' }), workdir = HOME, own = null, sideSearch = async () => null, pointScale = () => 'pixels' }) {
   // Relative paths (and run_command) start in workdir: the home folder for the chat, its own folder for an agent.
   const at = (p) => { const s = String(p ?? ''); return /^~(?=$|\/|\\)/.test(s) || path.isAbsolute(s) || /^[a-z]:[\\/]/i.test(s) ? s : path.join(workdir, s); };
   const where = workdir === HOME ? "the user's home folder" : `its working folder (${workdir})`;
@@ -320,9 +320,11 @@ export function createTools({ allowActions, ui, ask, openUrl, onCommitments, foc
     // whether the window moved.
     const area = res.area ?? bounds;
     // A picture that isn't the shape of the area it's said to show would point in the wrong place: refuse to point.
-    lastShot = !size || !bounds ? null : shotFits(area, ...size) ? { ...shotMap(area, ...size), bounds, win: res.window?.id ?? null, turn } : { unmapped: true, turn };
+    // The model's way of pointing (pixels or a 0–1000 grid), read once per screenshot: the model can change between requests.
+    const scale = pointScale();
+    lastShot = !size || !bounds ? null : shotFits(area, ...size) ? { ...shotMap(area, ...size, scale), bounds, win: res.window?.id ?? null, turn } : { unmapped: true, turn };
     const what = res.window ? `the ${res.window.app} window${res.window.title ? ` "${res.window.title}"` : ''}` : 'the whole screen';
-    const dims = lastShot?.unmapped ? ` (it doesn't line up with the window on screen, so don't point or click by its pixels; use visible words)` : size ? ` (${size[0]}×${size[1]} px; for draw or click_at give x, y in this image's pixels)` : '';
+    const dims = lastShot?.unmapped ? ` (it doesn't line up with the window on screen, so don't point or click by its pixels; use visible words)` : size ? shotUnits(...size, scale) : '';
     return { content: [{ type: 'text', text: `Screenshot of ${what}${dims}.` }, await imageBlock(file, 'image/jpeg')] };
   }
   // target: "screen", "front" (the window you're working in), an app name ("browser", "Safari", "Figma"),
@@ -355,10 +357,11 @@ export function createTools({ allowActions, ui, ask, openUrl, onCommitments, foc
       const r = await run('powershell', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(ps, 'utf16le').toString('base64')], { env: { ...process.env, ROAMIES_SHOT: file } });
       if (r.err) throw new Error('Screen capture failed.');
       const [pw, ph, iw, ih, sc] = r.stdout.trim().split(/\s+/).map(Number);
-      lastShot = pw && iw && sc ? { ...shotMap([0, 0, pw / sc, ph / sc], iw, ih), bounds: [0, 0, pw / sc, ph / sc], win: null, turn } : null;
+      const scale = pointScale();
+      lastShot = pw && iw && sc ? { ...shotMap([0, 0, pw / sc, ph / sc], iw, ih, scale), bounds: [0, 0, pw / sc, ph / sc], win: null, turn } : null;
       const data = (await fs.readFile(file)).toString('base64');
       fs.unlink(file).catch(() => {});
-      return { content: [{ type: 'text', text: `Screenshot of the main display${iw ? ` (${iw}×${ih} px; for draw give x, y in this image's pixels)` : ''}.` }, { type: 'image', mediaType: 'image/jpeg', data }] };
+      return { content: [{ type: 'text', text: `Screenshot of the main display${iw ? shotUnits(iw, ih, scale, 'draw') : ''}.` }, { type: 'image', mediaType: 'image/jpeg', data }] };
     }
     if (!LINUX) throw new Error(`Screenshots aren't available on ${process.platform}.`);
     // Linux: the app takes it (the X screen, or the desktop's screenshot portal on Wayland), shrunk to Claude's cap,
@@ -367,9 +370,10 @@ export function createTools({ allowActions, ui, ask, openUrl, onCommitments, foc
     if (!res?.ok) { fs.unlink(file).catch(() => {}); throw new Error(res?.error || 'Screen capture failed.'); }
     const [iw, ih] = Array.isArray(res.pixels) ? res.pixels : [];
     const b = Array.isArray(res.bounds) && res.bounds.length === 4 ? res.bounds : null;
-    lastShot = iw && ih && b ? { ...shotMap(b, iw, ih), bounds: b, win: null, turn } : null;
+    const scale = pointScale();
+    lastShot = iw && ih && b ? { ...shotMap(b, iw, ih, scale), bounds: b, win: null, turn } : null;
     const whole = t === 'screen' ? '' : ' (one app\'s window can\'t be captured alone on Linux, so this is the whole desktop)';
-    return { content: [{ type: 'text', text: `Screenshot of the whole desktop${whole}${iw ? ` (${iw}×${ih} px; for draw give x, y in this image's pixels)` : ''}.` }, await imageBlock(file, 'image/jpeg')] };
+    return { content: [{ type: 'text', text: `Screenshot of the whole desktop${whole}${iw ? shotUnits(iw, ih, scale, 'draw') : ''}.` }, await imageBlock(file, 'image/jpeg')] };
   }
 
   // ---------- drawing on screen (the draw tool) ----------
@@ -547,7 +551,7 @@ export function createTools({ allowActions, ui, ask, openUrl, onCommitments, foc
           shotOk = true;
         }
         const [w, h] = lastShot.size ?? [];
-        if (w && h && (x < -2 || y < -2 || x > w + 2 || y > h + 2)) throw new Error(`${Math.round(x)}, ${Math.round(y)} is outside the screenshot (${w}×${h} px).`);
+        if (w && h && (x < -2 || y < -2 || x > w + 2 || y > h + 2)) throw new Error(`${Math.round(x)}, ${Math.round(y)} is outside the screenshot (${lastShot.scale === 'norm1000' ? 'its 0–1000 grid' : `${w}×${h} px`}).`);
         return toScreen(lastShot, x, y);
       },
     };

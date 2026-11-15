@@ -222,6 +222,14 @@ pub(crate) fn set_esc(app: &AppHandle, label: &str, on: bool) {
         } else if !any && held {
             let _ = manager.unregister(key);
             ESC_ID.store(0, Ordering::Relaxed);
+            // global-hotkey's X11 backend queues the ungrab without sending it, so Esc stayed grabbed from every app
+            // until the next registration grabbed it again (#67). Registering anything sends the queue: a combo no one
+            // presses (it stays registered, so later calls only send the queue and report it's already there).
+            #[cfg(target_os = "linux")]
+            {
+                use global_hotkey::hotkey::Modifiers;
+                let _ = manager.register(HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SHIFT | Modifiers::SUPER), Code::F12));
+            }
         }
     });
 }
@@ -242,6 +250,8 @@ fn handle_voice(app: &AppHandle, msg: Value) {
     }
     if msg.get("type").and_then(Value::as_str) == Some("ready") {
         app.state::<Voice>().1.store(0, Ordering::Relaxed);
+        // A started (or restarted) helper doesn't know the picked mic yet: the sidecar sends it again.
+        to_sidecar(app, &json!({ "type": "voice_ready" }));
         return;
     }
     // Windows: the pen trail while circling something (voice-win/src/ink.rs); the overlays draw it, also during setup.
@@ -272,6 +282,12 @@ fn handle_voice(app: &AppHandle, msg: Value) {
         Some("error") => {
             let mut m = msg.clone();
             m["type"] = json!("voice_error");
+            to_sidecar(app, &m);
+        }
+        // The mic list, for the panel's picker.
+        Some("mics") => {
+            let mut m = msg.clone();
+            m["type"] = json!("voice_mics");
             to_sidecar(app, &m);
         }
         _ => {}

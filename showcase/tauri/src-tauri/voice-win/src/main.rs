@@ -144,6 +144,45 @@ const READ_EVERY: f64 = 0.8;
 // Parakeet makes up words ("Thank you.") from silence, so a take is only read once the mic heard a voice:
 // about -49 dBFS, above room noise and below quiet speech.
 const SPEECH_LEVEL: f64 = 0.15;
+// Hands-free, a take also ends once this much more sound came in without new words: steady noise or a voice in the
+// background can keep the level up, but it doesn't keep adding to what was said (#64).
+const STALE_ENDS: f64 = 4.0;
+
+/// The room's steady noise on the level scale, so background noise (a fan, a TV, a busy room) doesn't count as talking
+/// and keep a hands-free take open (#64). It starts at the take's first reading, falls almost at once to a quieter
+/// level and rises slowly to a louder one: speech dips between words, so it barely moves the floor, while noise that
+/// stays up soon becomes it.
+#[derive(Default)]
+struct NoiseFloor {
+    level: f64,
+    at: Option<f64>,
+}
+
+impl NoiseFloor {
+    const FALL: f64 = 0.05;
+    const RISE: f64 = 4.0;
+    // A voice is at least this far above the floor (0.25 is 10 dB) and above the old fixed bar.
+    const ABOVE: f64 = 0.25;
+    const VOICE: f64 = 0.2;
+
+    /// Takes the next level reading; true when it's loud enough over the room to be someone talking.
+    fn is_voice(&mut self, v: f64, now: f64) -> bool {
+        let Some(at) = self.at.replace(now) else {
+            self.level = v;
+            return v > Self::VOICE;
+        };
+        let dt = (now - at).clamp(0.0, 1.0);
+        let voice = v > Self::VOICE.max(self.level + Self::ABOVE);
+        let tau = if v < self.level { Self::FALL } else { Self::RISE };
+        self.level += (v - self.level) * (dt / tau).min(1.0);
+        voice
+    }
+}
+
+/// What was said, ignoring case and punctuation: a re-read that only moves a comma isn't new words.
+fn words(text: &str) -> String {
+    text.chars().filter(|c| c.is_alphanumeric() || c.is_whitespace()).flat_map(char::to_lowercase).collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ")
+}
 
 struct Voice {
     phase: Phase,
@@ -152,6 +191,7 @@ struct Voice {
     listen_at: f64,
     heard_at: f64,
     voice_at: f64,
+    floor: NoiseFloor,
     level_at: f64,
     released_at: Option<f64>,
     blocked: bool,
@@ -168,6 +208,8 @@ struct Voice {
     reading: bool,
     read_at: f64,
     read_len: usize,
+    // How much of the take had come in when its words last changed.
+    heard_len: usize,
     tail_until: Option<f64>,
     final_until: Option<f64>,
     test_audio: Option<PathBuf>,
@@ -185,6 +227,7 @@ impl Voice {
             listen_at: 0.0,
             heard_at: 0.0,
             voice_at: 0.0,
+            floor: NoiseFloor::default(),
             level_at: 0.0,
             released_at: None,
             blocked: false,
@@ -200,6 +243,7 @@ impl Voice {
             reading: false,
             read_at: 0.0,
             read_len: 0,
+            heard_len: 0,
             tail_until: None,
             final_until: None,
             test_audio,
@@ -299,8 +343,12 @@ impl Voice {
                     return;
                 }
                 let quiet = now - self.heard_at.max(self.voice_at);
+                let stale = self.read_len.saturating_sub(self.heard_len) as f64 / RATE as f64;
                 if !self.best.is_empty() && quiet > PAUSE_ENDS {
                     self.end("pause", now);
+                    self.finish();
+                } else if !self.best.is_empty() && stale > STALE_ENDS {
+                    self.end("no new words", now);
                     self.finish();
                 } else if self.best.is_empty() && !self.reading && now - self.listen_at > 8.0 && now - self.voice_at > PAUSE_ENDS {
                     self.end("nothing heard", now);
@@ -326,6 +374,7 @@ impl Voice {
         self.take += 1;
         self.reading = false;
         self.read_len = 0;
+        self.heard_len = 0;
         // Start the mic now so the first word isn't lost (a shortcut cancels it a moment later).
         if self.engine.is_some() && keys::mic_allowed() {
             self.start_audio();
@@ -360,6 +409,7 @@ impl Voice {
 
     fn start_audio(&mut self) {
         self.buf.lock().unwrap().clear();
+        self.floor = NoiseFloor::default();
         let sink = Sink::new(self.buf.clone(), self.tx.clone());
         let started = match &self.test_audio {
             Some(p) => audio::play_file(p, sink).map_err(|e| MicError::new("failed", e)),
@@ -430,8 +480,13 @@ impl Voice {
         }
         // A closing read that came back empty keeps whatever the live reads heard.
         if !text.is_empty() && text != self.best {
+            if words(&text) != words(&self.best) {
+                self.heard_at = self.now();
+                if !last {
+                    self.heard_len = self.read_len;
+                }
+            }
             self.best = text;
-            self.heard_at = self.now();
             if !matches!(self.phase, Phase::Idle | Phase::Armed) {
                 emit(json!({ "type": "partial", "text": self.best }));
             }
@@ -443,7 +498,7 @@ impl Voice {
 
     fn on_level(&mut self, v: f64) {
         let now = self.now();
-        if v > 0.2 {
+        if self.floor.is_voice(v, now) {
             self.voice_at = now;
         }
         if v > SPEECH_LEVEL && self.phase != Phase::Idle {
@@ -544,6 +599,14 @@ impl Voice {
                 Some("cancel") => self.external_cancel(),
                 Some("listen") => self.listen_now(),
                 Some("toggle") => self.toggle(),
+                // The panel's mic picker: the list, and a pick (a name from it; none or "" is the default), used from the
+                // next time the mic opens.
+                Some("mics") => emit(audio::mics()),
+                Some("mic") => {
+                    let id = msg.get("id").and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_owned);
+                    log(&format!("mic: {}", id.as_deref().unwrap_or("default")));
+                    *audio::CHOSEN.lock().unwrap() = id;
+                }
                 Some("chord") => {
                     let mods: Vec<String> = msg.get("mods").and_then(Value::as_array).map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect()).unwrap_or_default();
                     self.set_chord(&mods);
@@ -700,6 +763,72 @@ mod tests {
         v.toggle();
         assert_eq!(v.phase, Phase::HandsFree);
         let _ = std::fs::remove_file(wav);
+    }
+
+    #[test]
+    fn steady_background_noise_stops_counting_as_a_voice() {
+        // Regression (#64): a fan or TV at a steady level kept a hands-free take open until its 60 s limit.
+        let mut f = NoiseFloor::default();
+        let mut t = 0.0;
+        let mut voiced = 0;
+        for i in 0..400 {
+            t += 0.01;
+            if f.is_voice(0.45 + if i % 2 == 0 { 0.03 } else { -0.03 }, t) && i > 4 {
+                voiced += 1;
+            }
+        }
+        assert_eq!(voiced, 0, "steady noise is the floor, not a voice");
+        assert!(f.is_voice(0.8, t + 0.01), "speech well above the noise still counts");
+        // Speech in a quiet room: from the first dip between words, every word counts.
+        let mut q = NoiseFloor::default();
+        let mut t = 0.0;
+        let (mut spoken, mut voiced) = (0, 0);
+        for i in 0..300 {
+            t += 0.01;
+            let v = if i % 30 < 22 { 0.6 } else { 0.05 };
+            let voice = q.is_voice(v, t);
+            if i >= 30 && v > 0.5 {
+                spoken += 1;
+                voiced += voice as u32;
+            }
+        }
+        assert_eq!(voiced, spoken, "a voice over a quiet room counts throughout");
+        assert!(!NoiseFloor::default().is_voice(0.19, 0.0), "never below the old fixed bar");
+    }
+
+    #[test]
+    fn a_hands_free_take_ends_when_no_new_words_come() {
+        let (mut v, _jobs, wav) = voice();
+        v.toggle();
+        v.on_level(0.5);
+        v.read_len = RATE as usize * 2;
+        v.on_text(v.take, "turn on the".into(), false);
+        assert_eq!(v.heard_len, RATE as usize * 2);
+        // More sound, but a re-read that only changes punctuation or case isn't new words.
+        v.read_len = RATE as usize * 5;
+        v.on_text(v.take, "Turn on the.".into(), false);
+        assert_eq!(v.heard_len, RATE as usize * 2);
+        v.voice_at = v.now();
+        v.heard_at = v.now();
+        v.tick();
+        assert_eq!(v.phase, Phase::HandsFree, "3 s without new words: still listening");
+        v.read_len = RATE as usize * 7;
+        v.tick();
+        assert_eq!(v.phase, Phase::Finishing, "5 s of sound without new words ends it, noise or not");
+        let _ = std::fs::remove_file(wav);
+    }
+
+    #[test]
+    fn the_mic_list_names_each_mic_once() {
+        let names = ["USB Mic", "Built-in", "USB Mic", "", "Headset"].map(String::from);
+        assert_eq!(audio::unique(names), ["USB Mic", "Built-in", "Headset"]);
+    }
+
+    #[test]
+    fn words_ignores_case_and_punctuation() {
+        assert_eq!(words("Turn on the, lights."), "turn on the lights");
+        assert_eq!(words("  Hello   there "), words("hello there!"));
+        assert_ne!(words("hello there"), words("hello there friend"));
     }
 
     #[test]

@@ -346,7 +346,7 @@ final class Feed {
 }
 
 // Wake listening keeps the mic open. On a Bluetooth headset that drops it (AirPods too) to call-quality sound for as
-// long as it's on, so it listens on the built-in mic instead.
+// long as it's on, so it listens on the built-in mic instead. A mic picked in the panel is used for everything.
 enum InputDevice {
     private static func addr(_ sel: AudioObjectPropertySelector, _ scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal) -> AudioObjectPropertyAddress {
         AudioObjectPropertyAddress(mSelector: sel, mScope: scope, mElement: kAudioObjectPropertyElementMain)
@@ -372,6 +372,30 @@ enum InputDevice {
         guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &a, 0, nil, &size) == noErr else { return [] }
         var ids = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
         return AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &a, 0, nil, &size, &ids) == noErr ? ids : []
+    }
+    private static func text(_ dev: AudioDeviceID, _ sel: AudioObjectPropertySelector) -> String? {
+        var v: Unmanaged<CFString>?, size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        var a = addr(sel)
+        guard AudioObjectGetPropertyData(dev, &a, 0, nil, &size, &v) == noErr, let s = v?.takeRetainedValue() else { return nil }
+        return s as String
+    }
+    /// The mic picked in the panel, by its UID (the same across replugs); nil is automatic.
+    static var chosen: String?
+    /// The picked mic while it's plugged in; nil means automatic.
+    static func picked() -> AudioDeviceID? {
+        guard let uid = chosen else { return nil }
+        return all().first { hasInput($0) && text($0, kAudioDevicePropertyDeviceUID) == uid }
+    }
+    /// Wake listening's mic: the picked one, else the built-in one while the default is Bluetooth; nil is the default.
+    static func forListening() -> AudioDeviceID? { picked() ?? forWake() }
+    /// {"type":"mics"} for the panel's picker: every input [{id: UID, name}], the default's UID, and what automatic uses.
+    static func list() -> [String: Any] {
+        let mics = all().filter(hasInput).compactMap { d -> [String: String]? in
+            guard let uid = text(d, kAudioDevicePropertyDeviceUID) else { return nil }
+            return ["id": uid, "name": text(d, kAudioObjectPropertyName) ?? uid]
+        }
+        let uid = { (d: AudioDeviceID?) in d.flatMap { text($0, kAudioDevicePropertyDeviceUID) } ?? "" }
+        return ["type": "mics", "list": mics, "default": uid(defaultInput()), "auto": uid(forWake() ?? defaultInput()), "chosen": chosen ?? ""]
     }
     /// The built-in mic when the default input is Bluetooth; nil means use the default.
     static func forWake() -> AudioDeviceID? {
@@ -716,7 +740,7 @@ final class Voice {
         if dryRun { best = ProcessInfo.processInfo.environment["ROAMIES_VOICE_DRYRUN_TEXT"] ?? ""; return }
         // Already allowed: start the mic now so the first word isn't lost. Otherwise wait until
         // the press is clearly a talk (hold or tap), so shortcuts like ⌃⌥S never trigger a prompt.
-        if authorized { startAudio() }
+        if authorized { startAudio(device: InputDevice.picked()) }
     }
 
     private var authorized: Bool {
@@ -728,7 +752,7 @@ final class Voice {
         if !dryRun && rec == nil {
             ensureAuthorized { [weak self] in
                 guard let self, self.phase == .holding || self.phase == .handsFree, self.rec == nil else { return }
-                self.startAudio()
+                self.startAudio(device: InputDevice.picked())
             }
         }
         if !dryRun { OutputMute.begin() }
@@ -846,9 +870,15 @@ final class Voice {
         phase = .wake
         best = ""; wakeText = ""; wakeMiss = nil; woke = false; wakeLoud = 0
         wakeAt = now; heardAt = now; voiceAt = now
-        let device = InputDevice.forWake()
+        let device = InputDevice.forListening()
         startAudio(device: device)
-        if phase == .wake { wakeLog("listening\(device == nil ? "" : " on the built-in mic (the default input is Bluetooth)")") }
+        if phase == .wake { wakeLog("listening\(device == nil ? "" : InputDevice.picked() != nil ? " on the picked mic" : " on the built-in mic (the default input is Bluetooth)")") }
+    }
+
+    /// Another mic was picked: wake listening, or a mic kept open between takes, starts again on it next time.
+    func micChanged() {
+        if phase == .wake { stopWake() }
+        if phase == .idle { stopAudio(close: true) }
     }
 
     // Wake listening that stops soon after starting, again and again: wait longer each time (5 s, 30 s, 2 min, 10 min),
@@ -982,7 +1012,7 @@ final class Voice {
 
         let eng = AVAudioEngine()
         let input = eng.inputNode
-        if let device, !InputDevice.use(device, on: input) { log("couldn't switch to the built-in mic") }
+        if let device, !InputDevice.use(device, on: input) { log("couldn't switch to mic \(device)") }
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
             r.cancel()
@@ -1008,7 +1038,7 @@ final class Voice {
             guard let self, self.engine === eng, self.phase == .wake else { return }
             // Switching to the built-in mic (the default input is Bluetooth) reports a change of its own: restart on that
             // mic once rather than stopping, which reopened the mic every 5 s and kept interrupting what was playing.
-            if let device, !self.engineRestarted, InputDevice.forWake() == device {
+            if let device, !self.engineRestarted, InputDevice.forListening() == device {
                 self.engineRestarted = true
                 let input = eng.inputNode
                 input.removeTap(onBus: 0)
@@ -1037,7 +1067,7 @@ final class Voice {
     private func stopAudio(close: Bool = false) {
         OutputMute.end()
         feed.set(nil)
-        if !close, wakeOn, LiveTest.url == nil, let eng = engine, eng.isRunning, engineDevice == InputDevice.forWake() { return }
+        if !close, wakeOn, LiveTest.url == nil, let eng = engine, eng.isRunning, engineDevice == InputDevice.forListening() { return }
         LiveTest.sink = nil
         if let o = configObserver { NotificationCenter.default.removeObserver(o); configObserver = nil }
         guard let eng = engine else { return }
@@ -1331,6 +1361,11 @@ Thread.detachNewThread {
         // Roamies is answering or speaking: don't listen for the phrase (it mustn't wake itself).
         case "wake_hold": let on = msg["on"] as? Bool == true; DispatchQueue.main.async { voice.wakeHold = on }
         case "mute": if let on = msg["on"] as? Bool { DispatchQueue.main.async { OutputMute.enabled = on; if !on { OutputMute.end() } } }
+        // The panel's mic picker: the list, and a pick (a UID from it; none or "" is automatic).
+        case "mics": DispatchQueue.main.async { emit(InputDevice.list()) }
+        case "mic":
+            let id = (msg["id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            DispatchQueue.main.async { if InputDevice.chosen != id { InputDevice.chosen = id; log("mic: \(id ?? "automatic")"); voice.micChanged() } }
         default: break
         }
     }

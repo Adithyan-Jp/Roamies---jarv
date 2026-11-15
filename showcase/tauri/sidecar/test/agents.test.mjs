@@ -333,7 +333,7 @@ assert.match(agentSystem('maker', { dir: '/x', returns: 'answer' }), /report is 
   await mgr.openFolder(a.id); assert.ok(opened.at(-1).endsWith(`${path.sep}files`), 'a bad link falls back to its files');
   pa.result = keep;
 
-  // At most 3 working at once (1 on Ollama), and stopping one.
+  // At most 3 working at once (1 on a local model), and stopping one.
   const b = await mgr.start({ type: 'researcher', title: 'Flights', brief: 'Find flights.' });
   assert.equal(children.at(-1).sent[0].agent.returns, 'answer', 'a researcher answers');
   await assert.rejects(mgr.start({ type: 'maker', title: 'x', brief: 'x', returns: 'poem' }), /returns must be one of files, answer/);
@@ -347,7 +347,7 @@ assert.match(agentSystem('maker', { dir: '/x', returns: 'answer' }), /report is 
   assert.equal(lastOf('gone').agent.id, b.id);
   assert.equal(mgr.get(b.id).told, true, 'stopped by them: nothing to tell');
   provider = 'local';
-  await assert.rejects(mgr.start({ type: 'maker', title: 'Local', brief: 'x' }), /on Ollama/);
+  await assert.rejects(mgr.start({ type: 'maker', title: 'Local', brief: 'x' }), /on a local model/);
   provider = 'anthropic';
   // Frozen (no heartbeat) and stuck (nothing happening): stopped and marked failed; a stubborn one gets SIGKILL.
   const [h, t] = [children[2], children[3]];

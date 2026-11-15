@@ -28,7 +28,7 @@ export const STUDIO_MESSAGES = {
   starting: 'VoiceStudio is still starting up. Give it a moment, then press Check again.',
   other: "Something else is answering on VoiceStudio's port, not VoiceStudio.",
   engine: "VoiceStudio's voice engine isn't ready",
-  voice: "That VoiceStudio voice isn't there anymore. Pick another one on the Voice page.",
+  voice: "That VoiceStudio voice isn't there anymore. Pick another one on the Speaking page.",
   error: 'VoiceStudio ran into a problem',
   timeout: 'VoiceStudio took too long to answer.',
   closed: 'VoiceStudio closed the connection.',

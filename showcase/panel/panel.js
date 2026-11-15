@@ -16,7 +16,7 @@
   let state = null, tab = 'home', deferred = false;
   // What's open in the panel itself: a key field (provider id, 'fish' or 'gemini'), the row action waiting for its
   // Confirm, each long list's page (pg) and how many rows fit on one (per, measured), Memory's tab and its search.
-  const ui = { key: null, kind: {}, arm: null, pg: {}, per: {}, mtab: 'facts', q: '', bindShown: new Set() };
+  const ui = { key: null, kind: {}, arm: null, add: { label: '', url: '', key: '', images: false }, addSent: null, pg: {}, per: {}, base: {}, rec: null, mtab: 'facts', q: '', bindShown: new Set() };
   let armTimer = 0;
   const disarm = () => { clearTimeout(armTimer); if (ui.arm) { ui.arm = null; return true; } return false; };
 
@@ -385,17 +385,24 @@
   }
   // The page's footer: something about the whole list on the left, the arrows on the right; none when both are empty.
   const foot = (left, nav, id) => (left || nav ? el('div', { className: 'pfoot', id }, el('div', { className: 'pfoot-l' }, left), nav) : null);
-  // How many rows fit in each list's box now; true when that changed (so it's drawn again). An open row (a key
-  // field) takes its extra room off the page instead of setting the size of every row.
+  // How many rows fit in each list's box now; true when that changed (so it's drawn again). A plain row sets the
+  // size; a taller one (an open key field, a note under the row) takes its extra room off the page.
   function fit() {
     let changed = false;
     for (const box of document.querySelectorAll(`#pane-${tab} .pagebox`)) {
       const rows = [...box.querySelectorAll('.list > li')];
       if (!rows.length || !box.clientHeight) continue;
-      const shut = rows.filter((r) => !r.classList.contains('open'));
-      const unit = Math.max(...(shut.length ? shut : rows).map((r) => r.offsetHeight));
-      const extra = rows.filter((r) => r.classList.contains('open')).reduce((n, r) => n + Math.max(0, r.offsetHeight - unit), 0);
-      const per = Math.max(3, Math.floor((box.clientHeight - extra) / unit));
+      const open = (r) => r.classList.contains('open');
+      const shut = rows.filter((r) => !open(r));
+      const unit = Math.min(...(shut.length ? shut : rows).map((r) => r.offsetHeight));
+      const over = (list) => list.reduce((n, r) => n + Math.max(0, r.offsetHeight - unit), 0);
+      // Regression: a taller row on one page (Ollama's note) made that page smaller, which moved every page and showed
+      // rows twice. For the same box, the size without open rows only ever shrinks, so the pages hold still.
+      const k = box.dataset.pager, h = box.clientHeight, seen = ui.base[k];
+      let base = Math.floor((h - over(shut)) / unit);
+      if (seen?.h === h && seen.unit === unit) base = Math.min(base, seen.n);
+      ui.base[k] = { h, unit, n: base };
+      const per = Math.max(3, base - Math.ceil(over(rows.filter(open)) / unit));
       if (per !== ui.per[box.dataset.pager]) { ui.per[box.dataset.pager] = per; changed = true; }
     }
     return changed;
@@ -471,7 +478,7 @@
   }
 
   const signIn = (p) => link('Sign in', () => act(`login:${p.id}`), { k: `login:${p.id}`, aria: `Sign in to ${p.label}`, disabled: !!state.loggingIn });
-  const connect = (p) => link('Connect', () => act('local:connect'), { k: 'local:connect', aria: `Connect ${p.label}` });
+  const connect = (s) => link('Connect', () => act(`local:connect:${s.id}`), { k: `local:connect:${s.id}`, aria: `Connect ${s.label}` });
   const addKey = (p) => link(ui.key === p.id ? 'Cancel' : 'Add key', () => toggleKey(p.id), { k: `addkey:${p.id}`, aria: `Add ${p.label} API key` });
 
   // A connected account's key: replace it (saving under the same kind overwrites it), or add one next to a sign-in.
@@ -479,6 +486,7 @@
     { k: `addkey:${p.id}`, aria: `${p.keySaved ? 'Change the' : 'Add a'} ${p.label} API key` });
 
   // Settings, one page per concern.
+  const SIZE_TIPS = { default: 'My full size.', small: 'Half my size, so I take less of your screen.', cursor: 'I become a little arrow pointer, like your cursor.' };
   function modelPage() {
     const on = state.providers.filter((p) => p.on);
     const model = state.model ? `${state.model.provider}:${state.model.id}` : '';
@@ -486,8 +494,11 @@
       el('select', { 'aria-label': 'Model', 'data-k': 'model', on: { change: (e) => act(`model:${e.target.value}`) } },
         model ? null : el('option', { value: '', textContent: 'Pick a model', disabled: true, selected: true }),
         on.map((p) => el('optgroup', { label: p.label }, p.models.map((m) => el('option', { value: `${p.id}:${m.id}`, textContent: m.name, selected: `${p.id}:${m.id}` === model })))))) : null;
-    const accounts = state.providers.filter((p) => p.on || p.method);
-    const { box, nav } = paged('accounts', accounts, (p) => el('li', { className: `acct${ui.key === p.id ? ' open' : ''}` },
+    // The accounts, then each local server (Ollama, LM Studio, the ones added) and the Add a server row.
+    const servers = state.localServers ?? [];
+    if (ui.addSent != null && servers.length > ui.addSent) { ui.addSent = null; ui.add = { label: '', url: '', key: '', images: false }; if (ui.key === ADD) ui.key = null; }
+    const accounts = [...state.providers.filter((p) => p.id !== 'local' && (p.on || p.method)), ...servers.map((x) => ({ ...x, server: true })), { id: ADD, add: true }];
+    const { box, nav } = paged('accounts', accounts, (p) => (p.add ? addServerRow() : p.server ? serverRow(p) : el('li', { className: `acct${ui.key === p.id ? ' open' : ''}` },
       el('div', { className: 'setting' },
         // Connected: a lit dot by the name, its word in a tooltip (and for screen readers).
         el('span', { className: 'acct-name' }, p.label, p.on ? el('span', { className: 'led on', role: 'img', 'aria-label': p.method === 'local' ? 'Connected' : 'Signed in', 'data-tip': p.method === 'local' ? 'Connected' : 'Signed in' }) : null),
@@ -495,12 +506,9 @@
           p.key ? changeKey(p) : null,
           ui.key === p.id ? null : armed(p.signedIn && !p.keySaved ? 'Sign out' : 'Remove', 'Confirm', `signout:${p.id}`, `signout:${p.id}`, `Remove ${p.label} from Roamies`))
           : state.loggingIn === p.id ? el('span', { className: 'waiting', textContent: 'Signing in…' })
-          : p.method === 'local' ? connect(p)
           : p.method === 'oauth' ? (p.key ? el('span', { className: 'links' }, signIn(p), addKey(p)) : signIn(p))
           : addKey(p)),
-      // Ollama: why its models aren't in the Model menu (not running, or none can see images).
-      p.note ? el('p', { className: 'empty note', textContent: p.note }) : null,
-      p.method === 'key' || p.key ? keyForm(p.id, p.label, (key, kind) => send({ type: 'panel_key', provider: p.id, kind, key }), p.kinds) : null),
+      p.method === 'key' || p.key ? keyForm(p.id, p.label, (key, kind) => send({ type: 'panel_key', provider: p.id, kind, key }), p.kinds) : null)),
     { label: 'Accounts', pin: accounts.findIndex((p) => p.id === ui.key) });
     return [
       group('Model', 'Which AI answers you.', null,
@@ -509,10 +517,46 @@
       foot(null, nav),
     ];
   }
+  // A local server: connected (a lit dot) or not, its address if it was added, and why its models aren't in the
+  // Model menu (not running, or none can see images). Ollama and LM Studio disconnect; added ones are removed.
+  function serverRow(x) {
+    const remove = armed(x.custom ? 'Remove' : 'Disconnect', 'Confirm', `local:remove:${x.id}`, `local:remove:${x.id}`, `${x.custom ? 'Remove' : 'Disconnect'} ${x.label}`);
+    return el('li', { className: 'acct' },
+      el('div', { className: 'setting' },
+        // An added server's address is in its name's tooltip, so every row stays one line.
+        el('span', { className: 'acct-name' }, el('span', { className: 'acct-label', 'data-tip': x.baseUrl ?? null, tabIndex: x.baseUrl ? 0 : null, 'aria-describedby': x.baseUrl ? `addr-${x.id}` : null }, x.label, x.baseUrl ? el('span', { className: 'sr-only', id: `addr-${x.id}`, textContent: x.baseUrl }) : null),
+          x.on ? el('span', { className: 'led on', role: 'img', 'aria-label': 'Connected', 'data-tip': 'Connected' }) : null),
+        el('span', { className: 'row-btns' }, x.on ? remove : x.custom ? el('span', { className: 'links' }, connect(x), remove) : connect(x))),
+      x.note ? el('p', { className: 'empty note', textContent: x.note }) : null);
+  }
+  // Any other OpenAI-compatible server (llama.cpp, vLLM, oMLX…): a name, its address, a key if it needs one, and
+  // whether its models can see images (most servers don't say). Saved once it answers; the sidecar says if it didn't.
+  const ADD = 'local-add';
+  function addServerRow() {
+    const a = ui.add, open = ui.key === ADD;
+    const field = (id, prop, label, o = {}) => el('span', { className: 'px field' }, el('input', {
+      id, value: a[prop], 'aria-label': label, placeholder: o.placeholder ?? label, type: o.type ?? 'text', autocomplete: 'off', spellcheck: false, maxLength: o.max ?? 200,
+      on: { input: (e) => { a[prop] = e.target.value; }, keydown: (e) => { if (e.key === 'Enter') save(); else if (e.key === 'Escape') { e.stopPropagation(); closeKey(); } } } }));
+    const save = () => {
+      const label = a.label.trim(), url = a.url.trim();
+      if (!label) return $(`${ADD}-name`)?.focus() ?? $(`key-${ADD}`)?.focus();
+      if (!url) return $(`${ADD}-url`)?.focus();
+      ui.addSent = (state.localServers ?? []).length;
+      send({ type: 'panel_local_add', label, baseUrl: url, key: a.key.trim(), images: a.images });
+    };
+    return el('li', { className: `acct${open ? ' open' : ''}` },
+      el('div', { className: 'setting' },
+        el('span', { className: 'acct-label', 'data-tip': 'llama.cpp, vLLM, oMLX or any OpenAI-compatible server.' }, 'Another server'),
+        el('span', { className: 'row-btns' }, link(open ? 'Cancel' : 'Add server', () => toggleKey(ADD), { k: `addkey:${ADD}`, aria: open ? 'Cancel adding a server' : 'Add a server' }))),
+      open ? el('div', { className: 'addserver', 'data-anim': `key-${ADD}` },
+        el('div', { className: 'keyform' }, field(`key-${ADD}`, 'label', 'Server name', { placeholder: 'Name', max: 40 }), field(`${ADD}-url`, 'url', 'Server address', { placeholder: 'http://127.0.0.1:8080', max: 500 })),
+        el('div', { className: 'keyform' }, field(`${ADD}-key`, 'key', 'API key (optional)', { type: 'password', max: 1000 }), btn('Save', save, { k: `save:${ADD}` })),
+        toggle('Its models can see images', 'Most servers don\'t say, so tell me.', a.images, () => { a.images = !a.images; render(`img:${ADD}`); }, `img:${ADD}`)) : null);
+  }
   function appearancePage() {
     return [
       group('Look', 'Each look has its own name and voice.', null, lookTiles()),
-      group('Size', 'How big I am on your screen.', null, picks('Size', state.sizes, state.size, (x) => act(`size:${x}`), 'size')),
+      group('Size', 'How big I am on your screen.', null, picks('Size', state.sizes, state.size, (x) => act(`size:${x}`), 'size', SIZE_TIPS)),
     ];
   }
   // The looks as live tiles: each one's character, playing, at the size picked below. Kept between renders (a state update mustn't restart
@@ -538,6 +582,7 @@
       t.r?.setForm(state.size);
       const on = state.look === id;
       t.b.setAttribute('aria-checked', String(on)); t.b.tabIndex = on ? 0 : -1;
+      t.b.dataset.tip = on ? `I'm ${name} now.` : `Switch me to ${name}, with ${name}'s own voice.`;
       return t.b;
     }));
     return g;
@@ -562,8 +607,7 @@
     ];
   }
   const TTS_NAMES = { fish: 'Fish Audio', gemini: 'Gemini', voicestudio: 'VoiceStudio' };
-  function voicePage() {
-    const v = state.voice;
+  function speakingPage() {
     // The service that speaks, each with its own key: Fish Audio's voice is the look's and it has models to pick
     // from; Gemini has a list of voices and two models; VoiceStudio runs on this computer and needs no key.
     const tts = TTS_NAMES[state.tts] ? state.tts : 'fish', T = TTS_NAMES[tts], local = tts === 'voicestudio', hasKey = local || !!state[`${tts}Key`];
@@ -574,7 +618,7 @@
         picks('Replies', [['text', 'Text only'], ['voice', 'Voice and text']], state.replies, (x) => {
           if (x === 'voice' && !hasKey) { ui.key = tts; render(`key-${tts}`); note(`Add a ${T} key to hear me talk.`); return; }
           act(`replies:${x}`);
-        }, 'replies'),
+        }, 'replies', { text: 'I answer in writing only.', voice: `I say my answers out loud too, in the voice below${hasKey ? '' : `. Needs a ${T} key`}.` }),
         el('p', { className: 'sub', textContent: 'Voice provider' }),
         picks('Voice provider', Object.entries(TTS_NAMES), tts, (x) => {
           if (x !== 'voicestudio' && !state[`${x}Key`]) { ui.key = x; note(`Add a ${TTS_NAMES[x]} key to hear me talk.`); } // its key field opens with it
@@ -605,43 +649,97 @@
             link(ui.key === tts ? 'Cancel' : shared ? 'Use another' : hasKey ? 'Change' : 'Add', () => toggleKey(tts), { k: `addkey:${tts}`, aria: hasKey ? `Change the ${T} key` : `Add a ${T} key` }),
             hasKey && !shared && ui.key !== tts ? armed('Remove', 'Confirm', `${tts}key-remove`, `${tts}key_remove`, `Remove the ${T} key`) : null)),
         local ? null : keyForm(tts, T, (key) => send({ type: `panel_${tts}key`, key }))),
-      v ? group('Talking to me', 'Speak instead of typing.', null,
-        toggle('Voice control', v.download
-          ? (v.download.status === 'downloading' ? `Downloading the voice model… ${v.download.pct}%` : v.download.status === 'error' ? 'The download failed' : `Needs a ${v.download.size} download`)
-          : v.keys ? `Hold ${v.keys} to talk` : 'Press your talk shortcut to talk', v.on, () => act('voice'), 'voice'),
-        v.download && v.download.status !== 'downloading' ? el('div', { className: 'links' }, link(v.download.status === 'error' ? 'Retry the download' : `Download (${v.download.size})`, () => act('voicedl'), { k: 'voicedl' })) : null,
-        v.mac ? toggle('Mute Mac while talking', 'Other sounds go quiet while you talk', v.mute, () => act('mutetalk'), 'mutetalk') : null) : null,
     ];
+  }
+  // Which mic I listen on (from #59, by overspend1): automatic (the system's default, or on a Mac the built-in mic while
+  // that's a Bluetooth headset, which would drop to call-quality sound), or one picked here, kept while it's unplugged.
+  function micPicker(v) {
+    if (!v.mics?.length) return null;
+    const gone = v.mic && !v.mics.some((m) => m.id === v.mic);
+    return el('div', { className: 'reveal', 'data-anim': 'mic' },
+      el('p', { className: 'sub', textContent: 'Microphone' }),
+      el('span', { className: 'px field select' },
+        el('select', { 'aria-label': 'Microphone', 'data-k': 'mic', on: { change: (e) => act(`mic:${e.target.value}`) } },
+          el('option', { value: '', textContent: v.micAuto ? `Automatic (${v.micAuto})` : 'Automatic', selected: !v.mic }),
+          v.mics.map((m) => el('option', { value: m.id, textContent: m.name, selected: m.id === v.mic })),
+          gone ? el('option', { value: v.mic, textContent: 'Picked mic (unplugged, using automatic)', selected: true }) : null)));
   }
   // Wayland: the commands to bind to keys in the desktop's settings (no app may hold its own shortcuts there).
   // A command shows only after copying it failed, so it can be copied by hand.
   const BIND_ROWS = [['talk', 'Talk to me'], ['summon', 'Show or hide me'], ['ask', 'Ask me'], ['list', 'Your list'], ['panel', 'This panel']];
-  function behaviorPage() {
-    const b = state.bind;
+  // Talking to me, and when the mic opens without a key.
+  function listeningPage() {
+    const v = state.voice;
+    if (!v) return [group('Listening', 'Voice input isn’t available on this computer.', null)];
+    const needs = (hint) => (v.on ? hint : 'Needs Voice control on');
     return [
-      group('Behavior', 'What I may do, and when I start.', null,
-        toggle('Sound effects', null, state.sound, () => act('sound'), 'sound'),
+      group('Talking to me', 'Speak instead of typing.', null,
+        toggle('Voice control', v.download
+          ? (v.download.status === 'downloading' ? `Downloading the voice model… ${v.download.pct}%` : v.download.status === 'error' ? 'The download failed' : `Needs a ${v.download.size} download`)
+          : v.keys ? `Hold ${v.keys} to talk` : 'Press your talk shortcut to talk', v.on, () => act('voice'), 'voice'),
+        v.download && v.download.status !== 'downloading' ? el('div', { className: 'links' }, link(v.download.status === 'error' ? 'Retry the download' : `Download (${v.download.size})`, () => act('voicedl'), { k: 'voicedl' })) : null,
+        micPicker(v),
+        v.mac ? toggle('Mute Mac while talking', 'Other sounds go quiet while you talk', v.mute, () => act('mutetalk'), 'mutetalk') : null),
+      group('Hands-free', 'When the mic opens without a key.', null,
+        toggle('Auto-listen', needs('Mic opens when I ask you something.'), v.autoListen, () => act('autolisten'), 'autolisten'),
+        toggle('Listen after reminders', needs('Mic opens after a reminder, so you can say “snooze 10 minutes”.'), v.snoozeListen, () => act('snoozelisten'), 'snoozelisten'),
+        v.mac ? toggle('Wake word', needs(`Say “Hey ${v.wakeName || 'Roamies'}” to talk. Mic stays on.`), v.wakeWord, () => act('wakeword'), 'wakeword') : null,
+        v.mac ? el('div', { className: 'setting' }, el('span', {}, 'Wake word name', el('small', { textContent: `Hey ${v.wakeName || 'Roamies'}` })),
+          link('Change', () => act('wakename'), { k: 'wakename', aria: 'Change the wake word name' })) : null),
+    ];
+  }
+  // The keys that work from anywhere. On Wayland no app may hold its own, so it lists the commands to bind instead.
+  const SHORTCUT_LABELS = { summon: 'Show or hide me', snap: 'Ask about an area', list: 'Your list' };
+  function shortcutsPage() {
+    const b = state.bind, sc = state.shortcuts, w = state.writeKeys;
+    if (b) {
+      return [group('Shortcuts', 'Add these as custom shortcuts in your keyboard settings, with any keys you like.', null,
+        BIND_ROWS.filter(([k]) => b[k]).map(([k, label]) => el('div', { className: 'setting' },
+          el('span', {}, label, ui.bindShown.has(k) ? el('small', { className: 'cmd', textContent: b[k] }) : null),
+          link('Copy', () => send({ type: 'copy_bind', which: k }), { k: `bind-${k}`, aria: `Copy the command for ${label.toLowerCase()}` }))))];
+    }
+    if (!sc) return [group('Shortcuts', 'This computer doesn’t allow shortcuts that work from anywhere.', null)];
+    return [
+      sc.talk ? group('Talk', 'Hold two keys to talk. Tap them to talk hands-free.', null,
+        picks('Talk keys', sc.talk.pairs, sc.talk.value, (x) => act(`talk:${x}`), 'talk',
+          Object.fromEntries(sc.talk.pairs.map(([id, keys]) => [id, `Hold ${keys} to talk. If they’re your typing keys, the two swap.`])))) : null,
+      w ? group('Type to me', 'Tap two keys together to open a text box by the cursor.', null,
+        picks('Type-to-ask keys', [...w.pairs, ['off', 'Off']], w.value, (x) => act(`write:${x}`), 'write',
+          Object.fromEntries([...w.pairs.map(([id, keys]) => [id, `Tap ${keys} together, anywhere, to type to me.`]),
+            ['off', 'No tap opens the text box, so the keys stay free for other apps. The Ask button on Home still opens it.']]))) : null,
+      group('Other keys', 'Press Change, then the new keys. Esc cancels.', null,
+        sc.keys.map(({ id, words }) => {
+          const rec = ui.rec === id, label = SHORTCUT_LABELS[id] ?? id;
+          return el('div', { className: `setting${rec ? ' recording' : ''}` },
+            el('span', {}, label, el('small', { textContent: rec ? 'Press the new keys…' : words, 'aria-live': rec ? 'polite' : null })),
+            link(rec ? 'Cancel' : 'Change', () => { ui.rec = rec ? null : id; render(`rec-${id}`); }, { k: `rec-${id}`, aria: rec ? `Stop changing the keys for ${label.toLowerCase()}` : `Change the keys for ${label.toLowerCase()}` }));
+        })),
+    ];
+  }
+  // Things I do on my own through the day.
+  function routinesPage() {
+    const f = state.focus;
+    return [
+      group('Routines', 'Things I do on my own through the day.', null,
         state.brief ? toggle('Morning briefing', 'The first time you talk to me each day, I start with what’s due.', state.brief.on, () => act('morningbrief'), 'morningbrief') : null,
         state.brief?.on && state.brief.canTodoist ? toggle('Include Todoist', 'I read your Todoist window (opening it if needed). Stay signed in.', state.brief.todoist, () => act('brieftodoist'), 'brieftodoist') : null,
-        state.focus ? el('div', { className: 'setting' },
-          el('span', {}, state.focus.until ? 'Focus block running' : 'Focus distractions',
-            el('small', { textContent: state.focus.until ? `Until ${new Date(state.focus.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}${state.focus.task ? ` · ${state.focus.task}` : ''}` : `Say “focus for 30 minutes”. I watch for: ${state.focus.list.slice(0, 4).join(', ')}${state.focus.list.length > 4 ? '…' : ''}` })),
-          state.focus.until ? link('Stop', () => act('focusstop'), { k: 'focusstop', aria: 'Stop the focus block' }) : link('Edit', () => act('distractions'), { k: 'distractions', aria: 'Edit the distraction list' })) : null,
+        f ? el('div', { className: 'setting' },
+          el('span', {}, f.until ? 'Focus block running' : 'Focus distractions',
+            el('small', { textContent: f.until ? `Until ${new Date(f.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}${f.task ? ` · ${f.task}` : ''}` : `Say “focus for 30 minutes”. I watch for: ${f.list.slice(0, 4).join(', ')}${f.list.length > 4 ? '…' : ''}` })),
+          f.until ? link('Stop', () => act('focusstop'), { k: 'focusstop', aria: 'Stop the focus block' }) : link('Edit', () => act('distractions'), { k: 'distractions', aria: 'Edit the distraction list' })) : null),
+    ];
+  }
+  // What I may do, and when I start.
+  function generalPage() {
+    return [
+      group('General', 'What I may do, and when I start.', null,
+        toggle('Sound effects', null, state.sound, () => act('sound'), 'sound'),
+        toggle('Allow file edits and commands', 'Change files and run commands', state.actions, () => act('actions'), 'actions'),
+        state.login ? toggle('Open at login', null, state.login.on, () => act('login'), 'login') : null,
         state.sync ? el('div', { className: 'setting' },
           el('span', {}, 'Sync memory', el('small', { title: state.sync.dir, textContent: !state.sync.dir ? 'Share reminders and memory with your other computer' : state.sync.error ? `Not syncing: ${state.sync.error}` : `Via ${state.sync.dir.split(/[\\/]/).filter(Boolean).pop()}${state.sync.at ? ` · ${new Date(state.sync.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}` })),
           state.sync.dir ? [state.sync.paused ? link('Sync anyway', () => act('syncallow'), { k: 'syncallow', danger: true, aria: 'Sync anyway, removing those items on every computer' }) : null,
-            link('Stop', () => act('syncstop'), { k: 'syncstop', aria: 'Stop syncing memory' })] : link('Set up', () => act('syncsetup'), { k: 'syncsetup', aria: 'Set up memory sync' })) : null,
-        toggle('Allow file edits and commands', 'Change files and run commands', state.actions, () => act('actions'), 'actions'),
-        state.voice ? toggle('Auto-listen', state.voice.on ? 'Mic opens when I ask you something.' : 'Needs Voice control on', state.voice.autoListen, () => act('autolisten'), 'autolisten') : null,
-        state.voice ? toggle('Listen after reminders', state.voice.on ? 'Mic opens after a reminder, so you can say “snooze 10 minutes”.' : 'Needs Voice control on', state.voice.snoozeListen, () => act('snoozelisten'), 'snoozelisten') : null,
-        state.voice?.mac ? toggle('Wake word', state.voice.on ? `Say “Hey ${state.voice.wakeName || 'Roamies'}” to talk. Mic stays on.` : 'Needs Voice control on', state.voice.wakeWord, () => act('wakeword'), 'wakeword') : null,
-        state.voice?.mac ? el('div', { className: 'setting' }, el('span', {}, 'Wake word name', el('small', { textContent: `Hey ${state.voice.wakeName || 'Roamies'}` })),
-          link('Change', () => act('wakename'), { k: 'wakename', aria: 'Change the wake word name' })) : null,
-        state.login ? toggle('Open at login', null, state.login.on, () => act('login'), 'login') : null),
-      b ? group('Shortcuts', 'Add these as custom shortcuts in your keyboard settings, with any keys you like.', null,
-        BIND_ROWS.filter(([k]) => b[k]).map(([k, label]) => el('div', { className: 'setting' },
-          el('span', {}, label, ui.bindShown.has(k) ? el('small', { className: 'cmd', textContent: b[k] }) : null),
-          link('Copy', () => send({ type: 'copy_bind', which: k }), { k: `bind-${k}`, aria: `Copy the command for ${label.toLowerCase()}` })))) : null,
+            link('Stop', () => act('syncstop'), { k: 'syncstop', aria: 'Stop syncing memory' })] : link('Set up', () => act('syncsetup'), { k: 'syncsetup', aria: 'Set up memory sync' })) : null),
     ];
   }
   // Who made Roamies: Ken, live (he's drawn like the looks but isn't one), and where to find him.
@@ -717,7 +815,7 @@
   }
 
   // ---------------------------------------------------------------- render
-  const PANES = { home, memory, model: modelPage, appearance: appearancePage, voice: voicePage, behavior: behaviorPage, about: aboutPage, whatsnew: whatsNewPage };
+  const PANES = { home, memory, model: modelPage, appearance: appearancePage, speaking: speakingPage, listening: listeningPage, shortcuts: shortcutsPage, routines: routinesPage, general: generalPage, about: aboutPage, whatsnew: whatsNewPage };
   // focusKey: what to focus after (a data-k, or an element id); otherwise whatever had focus keeps it.
   function render(focusKey, animate = false) {
     if (!state) return;
@@ -772,7 +870,7 @@
     const changed = name !== tab;
     if (!changed && !focus) return;
     tab = name;
-    disarm(); ui.key = null;
+    disarm(); ui.key = null; ui.rec = null;
     for (const t of TABS) {
       if (t === name) navi(t).setAttribute('aria-current', 'page'); else navi(t).removeAttribute('aria-current');
       $(`pane-${t}`).hidden = t !== name;
@@ -793,6 +891,20 @@
     const j = e.key === 'ArrowDown' ? (i + 1) % n : e.key === 'ArrowUp' ? (i + n - 1) % n : e.key === 'Home' ? 0 : e.key === 'End' ? n - 1 : -1;
     if (j >= 0) { e.preventDefault(); show(TABS[j], true); }
   });
+  // Changing a shortcut on the Shortcuts page: the next key with Control, Option (Alt) or Command (Win) is the new one.
+  const KEY_CODE = /^(Key[A-Z]|Digit\d|F\d{1,2}|Space|Backquote|Minus|Equal|BracketLeft|BracketRight|Backslash|Semicolon|Quote|Comma|Period|Slash)$/;
+  document.addEventListener('keydown', (e) => {
+    const which = ui.rec;
+    if (!which) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    if (e.key === 'Escape') { ui.rec = null; render(`rec-${which}`); return; }
+    if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key) || !KEY_CODE.test(e.code)) return;
+    const mods = [e.ctrlKey && 'Control', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Command'].filter(Boolean);
+    if (!mods.some((x) => x !== 'Shift')) { note(state.os === 'mac' ? 'Hold Control, Option or Command too.' : 'Hold Ctrl or Alt too.', true); return; }
+    ui.rec = null;
+    act(`shortcut:${which}:${[...mods, e.code].join('+')}`);
+    render(`rec-${which}`);
+  }, true);
   // Radio groups: arrows move the choice, like the setup guide's.
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !e.defaultPrevented && tipFor) { e.preventDefault(); hideTip(); return; }
@@ -873,7 +985,7 @@
   // ---------------------------------------------------------------- browser preview
   function preview() {
     document.title = 'Roamies panel (preview with sample data)';
-    const at = Date.now();
+    const at = Date.now(), q = new URLSearchParams(location.search);
     const s = {
       version: '0.9.0', os: /Win/.test(navigator.platform) ? 'win' : 'mac',
       status: { state: 'ready', text: 'Ready' }, busy: false, canNew: true,
@@ -885,8 +997,14 @@
         { id: 'moonshot', label: 'Kimi (Moonshot)', on: false, method: 'key', models: [], kinds: [
           { id: 'kimi-code', label: 'Kimi Code', billing: 'Uses your Kimi Code plan. Create the key in the Kimi Code Console.' },
           { id: 'moonshot', label: 'Moonshot', billing: 'Pay-per-token from platform.moonshot.ai.' }] },
-        { id: 'local', label: 'Ollama (on this computer)', on: false, method: 'local', models: [] },
+        { id: 'local', label: 'Local models', on: q.has('local'), method: 'local', models: q.has('local') ? [{ id: 'local/ollama/qwen3-vl:8b', name: 'qwen3-vl:8b (Ollama)' }] : [] },
         ...['xAI', 'GLM (Z.ai)', 'MiniMax', 'Xiaomi', 'DeepSeek', 'Sakana', 'OpenRouter', 'Hugging Face'].map((label) => ({ id: label.toLowerCase().replace(/\W/g, ''), label, on: false, method: 'key', models: [] })),
+      ],
+      // ?local: Ollama connected, LM Studio not running, and an added server whose models can't see images.
+      localServers: [
+        { id: 'ollama', label: 'Ollama', custom: false, baseUrl: null, on: q.has('local'), note: '' },
+        { id: 'lmstudio', label: 'LM Studio', custom: false, baseUrl: null, on: q.has('local'), note: q.has('local') ? "LM Studio isn't running." : '' },
+        ...(q.has('local') ? [{ id: 'gpu-box', label: 'GPU box', custom: true, baseUrl: 'http://192.168.1.40:8000/v1', on: true, note: 'None marked as seeing images. Re-add to change.' }] : []),
       ],
       loggingIn: null,
       recent: [
@@ -910,12 +1028,11 @@
       geminiShared: new URLSearchParams(location.search).has('shared'), geminiModel: 'gemini-3.8-flash-lite-tts',
       geminiModels: [{ id: 'gemini-3.8-flash-lite-tts', name: 'Flash Lite', per10s: 0.0015 }, { id: 'gemini-3.8-flash-tts', name: 'Flash', per10s: 0.00225 }],
       fishModels: [{ id: 'drama-3', name: 'Drama 3', perM: 50, promo: { perM: 10, until: '2026-12-01T08:00:00Z' } }, { id: 's2.1-pro', name: 'S2.1 Pro', perM: 15 }],
-      voice: { on: true, keys: '⌃⌥', ready: true, mac: true, mute: true, wakeWord: false, wakeName: 'Roamies', download: null }, askKeys: '⌥⌘',
+      voice: { on: true, keys: '⌃⌥', ready: true, mac: true, mute: true, mics: [{ id: 'BuiltIn', name: 'MacBook Pro Microphone' }, { id: 'airpods', name: 'AirPods Pro' }], mic: '', micAuto: 'MacBook Pro Microphone', wakeWord: false, wakeName: 'Roamies', download: null }, askKeys: '⌥⌘', brief: { on: true, todoist: false, canTodoist: true }, focus: { until: null, task: '', list: ['YouTube', 'Reddit', 'X', 'Steam', 'Netflix'], custom: false }, sync: { dir: '', at: null, error: null, paused: false }, shortcuts: { talk: { value: 'control+option', pairs: [['control+option', 'Control+Option'], ['option+command', 'Option+Command'], ['control+command', 'Control+Command'], ['control+shift', 'Control+Shift'], ['option+shift', 'Option+Shift']] }, keys: [{ id: 'summon', words: 'Control+Option+S' }, { id: 'snap', words: 'Control+Option+A' }, { id: 'list', words: 'Control+Option+L' }] }, writeKeys: { value: 'option+command', pairs: [['option+command', 'Option+Command'], ['control+command', 'Control+Command'], ['control+shift', 'Control+Shift'], ['option+shift', 'Option+Shift']] },
       sound: true, actions: false, login: { on: true },
       update: { available: new URLSearchParams(location.search).has('update') && new URLSearchParams(location.search).get('update') !== 'failed' ? '0.9.1' : null, installing: false, checking: false, result: null },
       intro: false,
     };
-    const q = new URLSearchParams(location.search);
     if (q.has('busy')) Object.assign(s, { busy: true, status: { state: 'busy', text: 'Reading notes.md' } });
     if (q.has('empty')) Object.assign(s, { recent: [], facts: [], commitments: [], usage: null });
     if (q.has('many')) {

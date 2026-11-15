@@ -79,3 +79,23 @@ console.log('screenshot shape tests: passed');
   assert.equal(snapRect([1460, 100, 8, 8], [theme]), null, 'a tiny spot inside a big control: not grown');
   console.log('snap tests: passed');
 }
+
+// Regression (#63): Qwen3-VL and Qwen3.5 answer on a 0–1000 grid whatever the image size, so their points were read
+// as pixels and landed up and to the left of the target.
+{
+  const { pointScale } = await import('@kenkaiiii/gg-core');
+  const { shotUnits } = await import('../pointing.mjs');
+  const grid = shotMap([0, 39, 1800, 1066], 1568, 929, 'norm1000');
+  assert.deepEqual(grid.size, [1000, 1000], 'the bounds checks use the grid');
+  assert.deepEqual(toScreen(grid, 500, 500), [900, 572], 'the grid centre is the window centre');
+  assert.deepEqual(toScreen(grid, 1000, 1000), [1800, 1105], 'far corner is the far window corner');
+  assert.deepEqual(toScreen(grid, 0, 0), [0, 39]);
+  assert.deepEqual(shotMap([0, 39, 1800, 1066], 1568, 929).size, [1568, 929], 'pixels by default');
+  assert.match(shotUnits(1568, 929, 'norm1000'), /1568×929 px.*0–1000 grid.*1000, 1000 its bottom right.*screenshot pixels, use this grid/);
+  assert.match(shotUnits(1568, 929), /1568×929 px; for draw or click_at give x, y in this image's pixels/);
+  assert.doesNotMatch(shotUnits(1568, 929), /grid/);
+  assert.equal(pointScale('local/ollama/qwen3-vl:8b'), 'norm1000');
+  assert.equal(pointScale('local/lmstudio/qwen3.5-27b'), 'norm1000');
+  assert.equal(pointScale('claude-sonnet-5-5'), 'pixels');
+  console.log('0–1000 grid tests: passed');
+}

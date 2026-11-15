@@ -297,7 +297,7 @@ export function createAgents({ fork, ui, config, root, userName = 'The user', ru
     if (!String(brief ?? '').trim()) throw new Error('The brief is empty: say everything the agent needs, it sees none of this conversation.');
     const md = await config.model();
     const cap = md.provider === 'local' ? LIMITS.local : LIMITS.running, busy = running().length;
-    if (busy >= cap) throw new Error(`${busy} agent${busy === 1 ? ' is' : 's are'} already working, and ${cap} at once is the most${md.provider === 'local' ? ' on Ollama' : ''}. Tell ${userName}: they can stop one (or wait for one to finish) and ask again.`);
+    if (busy >= cap) throw new Error(`${busy} agent${busy === 1 ? ' is' : 's are'} already working, and ${cap} at once is the most${md.provider === 'local' ? ' on a local model' : ''}. Tell ${userName}: they can stop one (or wait for one to finish) and ask again.`);
     let to = null;
     if (deliverTo) {
       to = path.resolve(String(deliverTo).replace(/^~(?=$|\/|\\)/, home));

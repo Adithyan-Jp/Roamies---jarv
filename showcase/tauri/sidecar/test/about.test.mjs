@@ -16,6 +16,12 @@ assert.ok(!/Ask About an Area|Wake word|Voice Control|Cursor, a little arrow/.te
 assert.match(linux, /AppIndicator extension/);
 assert.match(linux, /installs? by themselves when Roamies runs as an AppImage/);
 assert.ok(!/Wake word/.test(linux), 'the wake word is Mac only');
+// The settings pages as the panel names them (Speaking, Listening, Shortcuts, Routines, General since the split).
+assert.match(mac, /Speaking \(Replies:.*Listening \(Voice Control.*Shortcuts \(.*Routines \(Morning Briefing.*General \(Sound Effects/);
+assert.match(linux, /Shortcuts \(the commands to bind/, 'no global keys there: the commands to bind');
+for (const t of [mac, win, linux]) assert.ok(!/Behavior \(|, Voice \(/.test(t), 'no old page names');
+// The Model page's local servers (#63, #66): Ollama, LM Studio and any other server, as the panel names them.
+assert.match(win, /Model \(.*Ollama and LM Studio, each with Connect or Disconnect.*Another server with Add server.*Its models can see images/);
 for (const t of [mac, win, linux]) {
   assert.match(t, /Save Diagnostics/);
   assert.match(t, /github\.com\/KenKaiii\/Roamies/);

@@ -91,3 +91,26 @@ for (const p of ['darwin', 'win32', 'linux']) {
 assert.ok(!writeChords('win32').some((c) => c.includes('command')) && !writeChords('linux').some((c) => samePair(c, ['option', 'shift'])), 'no Win key and no Alt+Shift on a PC');
 assert.ok(samePair(['a', 'b'], ['b', 'a']) && !samePair(['a', 'b'], ['a', 'c']) && !samePair(['a', 'a'], ['a', 'b']) && !samePair(null, ['a', 'b']));
 console.log('platform tests: passed');
+
+// Regression (#65): the type-to-ask tap can be turned off, and then no pair is taken.
+assert.equal(writeChord('darwin', TALK, 'off'), null, "saved as 'off': no pair");
+assert.equal(writeChord('win32', TALK, 'off'), null);
+
+// The mic picker's list (#59): only usable entries, cut to size, and what automatic uses.
+{
+  const { cleanMics } = await import('../platform.mjs');
+  const m = cleanMics({ list: [{ id: 'BuiltInMicrophoneDevice', name: 'MacBook Pro Microphone' }, { id: '', name: 'blank' }, { name: 'no id' }, null, { id: 'usb-1' }], default: 'airpods', auto: 'BuiltInMicrophoneDevice' });
+  assert.deepEqual(m.list, [{ id: 'BuiltInMicrophoneDevice', name: 'MacBook Pro Microphone' }, { id: 'usb-1', name: 'usb-1' }]);
+  assert.equal(m.auto, 'BuiltInMicrophoneDevice', 'automatic: the mic it really uses');
+  assert.equal(cleanMics({ list: [], default: 'Mic (Realtek)' }).auto, 'Mic (Realtek)', 'Windows and Linux send only the default');
+  assert.equal(cleanMics({ list: Array.from({ length: 60 }, (_, i) => ({ id: `m${i}` })) }).list.length, 40);
+  assert.deepEqual(cleanMics(null), { list: [], auto: '' });
+}
+
+// The talk pairs the panel's Shortcuts page offers: the setup guide's, the default first, never the Win key on a PC.
+{
+  const { talkChords } = await import('../platform.mjs');
+  assert.deepEqual(talkChords('darwin')[0], ['control', 'option']);
+  assert.equal(talkChords('darwin').length, 5);
+  for (const p of ['win32', 'linux']) assert.ok(talkChords(p).every((c) => !c.includes('command')), `${p}: no Win/Super key`);
+}

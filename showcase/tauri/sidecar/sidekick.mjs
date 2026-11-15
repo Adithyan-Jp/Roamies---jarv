@@ -9,9 +9,10 @@ import { ClaudeCodeAgent, closeSpare } from './claudecode.mjs';
 import { SAFE, checkDrawAction, checkLink, checkOpen, checkRead, checkWrite, redactArgs } from './safety.mjs';
 import { agentsRoot, createAgents, holdAfterLaunch, newsDesk, wantsAgent } from './agents.mjs';
 import { agentEvents, stallWatch } from './agentstream.mjs';
+import { CATALOG_PROVIDERS, createCatalogs } from './catalogs.mjs';
 import {
   AUTH_PROVIDERS, AuthStorage, OPENAI_CHATGPT_KEY, apiKeyStorageKeys, claudeCodeEnv, dualAuthProvider, getAuthStorageKeys, getContextWindow, getDefaultModel, getModel,
-  getModelsForProvider, loginChatGPT, ollamaServedContext, parseLocalModelId, registerRuntimeModels, resolveClaudeCodeBinary, revokeChatGPTSignIn, signInWithClaudeCode,
+  getModelsForProvider, loginChatGPT, ollamaServedContext, parseLocalModelId, pointScale, registerRuntimeModels, resolveClaudeCodeBinary, revokeChatGPTSignIn, signInWithClaudeCode,
   signOutOfClaudeCode, storageKeyProvider,
 } from '@kenkaiiii/gg-core';
 import { execFile, execFileSync, fork } from 'node:child_process';
@@ -45,9 +46,9 @@ import { GEMINI_CHOICES, GEMINI_DEFAULT_VOICE, GEMINI_LOOK_VOICES, GEMINI_MODEL,
 import { createSecrets, retryLoad, runInput } from './secrets.mjs';
 import { showTrayIcon } from './wintray.mjs';
 import { createActivity } from './activity.mjs';
-import { canCircle, canSnap, hasHands, hasHotkeys, hasVoice, linuxSession, micTrouble, needsVoiceModel, platformLine, samePair, seesPointer, writeChord, writeChords } from './platform.mjs';
-import { accountKeys, keyCards, keyKinds, signInCards } from './providers.mjs';
-import { OLLAMA, OLLAMA_KEY, connectLocal, contextNote, withWindow } from './local.mjs';
+import { canCircle, canSnap, cleanMics, talkChords, hasHands, hasHotkeys, hasVoice, linuxSession, micTrouble, needsVoiceModel, platformLine, samePair, seesPointer, writeChord, writeChords } from './platform.mjs';
+import { accountKeys, keyCards, keyKinds, seesImages, signInCards } from './providers.mjs';
+import { OLLAMA, connectLocal, contextNote, downNote, forgetLocal, newServer, noModelsNote, serverFor, serverList, syncLocal as syncServers, withWindow } from './local.mjs';
 import { activityLogs, buildReport, redact, reportDir, reportName, reveal, run, scrubConfig, tail } from './diagnostics.mjs';
 import { detailsText, explain } from './errors.mjs';
 import { aboutRoamies } from './about.mjs';
@@ -89,7 +90,7 @@ const OAUTH = {
   // The current sign-in's ID token skips OpenAI's account picker.
   openai: async (cb, signal) => { const previous = await auth.getCredentials(OPENAI_CHATGPT_KEY).catch(() => null); return loginChatGPT(cb, { ...(previous ? { previous } : {}), signal }); },
 };
-const PROVIDER_LABELS = { ...Object.fromEntries(AUTH_PROVIDERS.map((p) => [p.value, p.label])), local: 'Ollama (on this computer)' };
+const PROVIDER_LABELS = { ...Object.fromEntries(AUTH_PROVIDERS.map((p) => [p.value, p.label])), local: 'Local models' };
 // What a sign-in is called (the product), where the provider's label is the company.
 const SIGNIN_NAMES = { anthropic: 'Claude', openai: 'ChatGPT' };
 const MENU_PROVIDERS = ['anthropic', 'openai', ...AUTH_PROVIDERS.map((p) => p.value), 'local'].filter((v, i, a) => a.indexOf(v) === i);
@@ -257,12 +258,47 @@ const keys = () => { const k = { ...DEFAULT_KEYS, ...(config.keys ?? {}) }; retu
 const sortMods = (m) => [...m].sort((a, b) => MOD_ORDER.indexOf(a) - MOD_ORDER.indexOf(b));
 const talkSymbols = () => (process.platform === 'darwin' ? sortMods(keys().talk).map((m) => MOD_SYMBOL[m]).join('') : talkWords());
 const talkWords = () => sortMods(keys().talk).map((m) => MOD_WORD[m]).join('+');
-const writeWords = () => sortMods(keys().write).map((m) => MOD_WORD[m]).join('+');
-const writeSymbols = () => (process.platform === 'darwin' ? sortMods(keys().write).map((m) => MOD_SYMBOL[m]).join('') : writeWords());
+const pairWords = (pair) => sortMods(pair).map((m) => MOD_WORD[m]).join('+');
+const pairSymbols = (pair) => (process.platform === 'darwin' ? sortMods(pair).map((m) => MOD_SYMBOL[m]).join('') : pairWords(pair));
+// The type-to-ask pair; '' when its tap is off.
+const writeWords = () => (keys().write ? pairWords(keys().write) : '');
+const writeSymbols = () => (keys().write ? pairSymbols(keys().write) : '');
 const validTalk = (t) => Array.isArray(t) && t.length === 2 && new Set(t).size === 2 && t.every((m) => MOD_ORDER.includes(m));
 // Accelerators look like "Control+Alt+KeyS": at least one of Control/Alt/Command, then one key code.
 const validSummon = (a) => typeof a === 'string' && /^((Control|Alt|Shift|Command)\+)+[A-Za-z0-9]+$/.test(a) && /(Control|Alt|Command)\+/.test(a);
 // The shell watches for the type-to-ask tap itself; on Wayland it can't see the keys, so it gets no pair.
+// Talk, type-to-ask and the other shortcuts, from the setup guide or the panel's Shortcuts page. → an error to show, else ''.
+function applyKeys(m) {
+  const now = keys(), next = { ...now };
+  // Talk and type-to-ask never share a pair: picking the pair the other one has swaps the two.
+  if (m.talk !== undefined) {
+    if (!validTalk(m.talk)) return 'Pick two different modifier keys.';
+    if (samePair(m.talk, now.write)) next.write = now.talk;
+    next.talk = m.talk;
+  }
+  if (m.write !== undefined) {
+    if (m.write !== 'off' && !writeChords(process.platform).some((c) => samePair(c, m.write))) return 'Pick one of the pairs shown.';
+    if (m.write !== 'off' && samePair(m.write, next.talk)) {
+      // With the tap off there's no pair to swap talk onto.
+      if (!now.write) return 'Those are your talk keys. Pick another pair.';
+      next.talk = now.write;
+    }
+    next.write = m.write === 'off' ? null : m.write;
+  }
+  for (const which of ['summon', 'snap', 'list']) {
+    if (m[which] === undefined) continue;
+    if (!validSummon(m[which])) return 'Use at least one of Control, Option or Command, plus a key.';
+    if (['summon', 'snap', 'list'].some((o) => o !== which && m[which] === next[o])) return 'That shortcut is already used for something else here.';
+    next[which] = m[which];
+  }
+  keysBefore = now;
+  saveKeys(next);
+  return '';
+}
+// The panel's Shortcuts page: a problem shows as the panel's note.
+const keysFromPanel = (m) => { const error = applyKeys(m); if (error) panelNote(error, true); };
+// keys() says off as write: null; it's saved as 'off', since a missing or bad pair falls back to the default.
+const saveKeys = (k) => { config.keys = { ...k, write: k.write ?? 'off' }; saveConfig(); sendKeys(); menu(); };
 const sendKeys = () => send({ type: 'keybinds', ...keys(), write: HOTKEYS_OK ? keys().write : undefined });
 // How to talk, in a sentence: hold the keys, or on Wayland (where no app can watch the keyboard) press the shortcut
 // they bound to `roamies --talk`, which starts listening and sends on a second press or a pause.
@@ -292,6 +328,19 @@ const LAUNCH = process.env.ROAMIES_LAUNCH || 'roamies';
 const BIND = Object.fromEntries(['summon', 'talk', 'ask', 'list', 'panel'].map((k) => [k, `${LAUNCH} --${k}`]));
 
 const auth = new AuthStorage();
+// OpenRouter's and OpenCode's full model lists (gg-core ships only a few of each), cached next to the sessions.
+const catalogs = createCatalogs({ auth, dir: STORE_DIR });
+// Reads the stale lists of connected providers (or just `only`, right after its key is saved) and updates the menu.
+function refreshCatalogs(only) {
+  const read = only ? catalogs.refresh(only) : catalogs.refreshStale(CATALOG_PROVIDERS.filter((p) => signedIn.get(p)));
+  read.then((changed) => {
+    if (!changed) return;
+    const before = config.model;
+    ensureModel();
+    if (config.model !== before) agent = null;
+    menu();
+  }).catch(() => {});
+}
 const signedIn = new Map();
 // Per method, for the guide's cards: Claude and ChatGPT can be signed in, have a key, or both. keyOn is per kind
 // of key (keyCards' ids): Kimi and Xiaomi each take a plan key and a pay-per-token key, saved apart.
@@ -306,42 +355,82 @@ async function refreshAuth() {
     for (const [id] of kinds) keyOn.set(id, await (kinds.length > 1 ? auth.hasCredentials(id) : auth.hasApiKey(id)).catch(() => false));
     for (const k of apiKeyStorageKeys(meta.value)) if (await auth.hasCredentials(k).catch(() => false)) storedKeys.add(k); else storedKeys.delete(k);
   }
-  if (await auth.hasCredentials(OLLAMA_KEY).catch(() => false)) storedKeys.add(OLLAMA_KEY); else storedKeys.delete(OLLAMA_KEY);
+  for (const k of servers().map((x) => `local:${x.id}`)) if (await auth.hasCredentials(k).catch(() => false)) storedKeys.add(k); else storedKeys.delete(k);
 }
-// Ollama's models, found when it's connected: those that can see and use tools. ollama.windows: the context it
-// really serves each one with, measured once the model is loaded (until then gg-core may guess 4k).
-const ollama = { windows: new Map(), reachable: false };
-async function syncLocal(save = false) {
-  const r = await connectLocal(auth, { save, windows: ollama.windows }).catch(() => ({ ok: false, models: [], all: 0 }));
-  ollama.reachable = r.ok;
-  return r;
+// The local servers: Ollama, LM Studio and the ones the user added. Their models are found when they're connected:
+// those that can see and use tools. local.windows: the context Ollama really serves each model with, measured once
+// it's loaded (until then gg-core may guess 4k). local.status: each connected server's last answer, by id.
+const servers = () => serverList(config.localServers);
+const local = { windows: new Map(), status: new Map(), warned: new Set() };
+async function syncLocal() {
+  local.status = await syncServers(auth, servers(), { windows: local.windows }).catch(() => new Map());
+  return local.status;
 }
-// Loads the model the way a request would and reads its real window, so requests are fitted to it.
+// Ollama only: loads the model the way a request would and reads its real window, so requests are fitted to it.
+// Other servers report their window; one that's too small is said once.
 async function measureLocal(id) {
-  const raw = parseLocalModelId(id)?.rawId;
+  const { endpointId, rawId: raw } = parseLocalModelId(id) ?? {};
   const m = getModel(id);
-  if (!raw || !m || ollama.windows.has(id)) return;
+  if (!raw || !m) return;
+  if (endpointId !== OLLAMA.id) {
+    const note = contextNote(m.contextWindow, serverFor(servers(), id));
+    if (note && !local.warned.has(id)) { local.warned.add(id); say(note, 'concerned'); panelNote(note, true); }
+    return;
+  }
+  if (local.windows.has(id)) return;
   const ctx = await ollamaServedContext(OLLAMA, raw, { load: true }).catch(() => undefined);
   if (!ctx) return;
-  ollama.windows.set(id, ctx);
+  local.windows.set(id, ctx);
   registerRuntimeModels([withWindow(m, ctx)]);
   logLine('local_context', { model: id, context: ctx });
   const note = contextNote(ctx);
   if (note) { say(note, 'concerned'); panelNote(note, true); }
 }
-async function connectOllama() {
-  const r = await syncLocal(true);
-  if (!r.ok) return panelNote("Ollama isn't running on this computer. Open it (get it at ollama.com), then try again.", true);
+const HOW_TO_GET = { ollama: ' Open it (get it at ollama.com), then try again.', lmstudio: ' Open it (get it at lmstudio.ai), turn on its server (Developer → Start Server), then try again.' };
+const connectedNote = (s, r) => (r.models.length ? `${s.label} is connected: ${r.models.length} model${r.models.length === 1 ? '' : 's'} that can see your screen.`
+  : `${s.label} is connected, but I can't use any of its models yet. ${noModelsNote(s, r.all)}`);
+async function connectServer(id) {
+  const s = servers().find((x) => x.id === id);
+  if (!s) return;
+  const r = await connectLocal(auth, s, { save: true, windows: local.windows }).catch(() => ({ ok: false, models: [], all: 0 }));
+  if (!r.ok) return panelNote(`${downNote(s, r.reason)}${/rejected/.test(r.reason ?? '') ? '' : HOW_TO_GET[s.id] ?? ' Start it, then try again.'}`, true);
+  local.status.set(s.id, r);
   await refreshAuth(); ensureModel(); menu();
-  panelNote(r.models.length ? `Ollama is connected: ${r.models.length} model${r.models.length === 1 ? '' : 's'} that can see your screen.`
-    : `Ollama is connected, but none of its models can see images. Get one with: ollama pull qwen3.5:4b`, !r.models.length);
+  panelNote(connectedNote(s, r), !r.models.length);
+}
+// The Add a server form: saved only once the server answers, with its key (if any) in auth.json.
+async function addServer({ label, baseUrl, key, images }) {
+  const made = newServer(config.localServers, { label, baseUrl, images });
+  if (made.error) return panelNote(made.error, true);
+  const s = serverList([made.server]).at(-1);
+  const r = await connectLocal(auth, s, { save: true, apiKey: key || undefined, windows: local.windows }).catch(() => ({ ok: false, models: [], all: 0 }));
+  if (!r.ok) return panelNote(/rejected/.test(r.reason ?? '') ? `${s.label} rejected that key. Check it and try again.` : `I couldn't reach ${s.baseUrl}. Check the address and that the server is running, then try again.`, true);
+  config.localServers = [...(Array.isArray(config.localServers) ? config.localServers : []), made.server]; saveConfig();
+  local.status.set(s.id, r);
+  logLine('local_server', { kind: 'add', models: r.models.length, all: r.all });
+  await refreshAuth(); ensureModel(); menu();
+  panelNote(connectedNote(s, r), !r.models.length);
+}
+async function removeServer(id) {
+  const s = servers().find((x) => x.id === id);
+  if (!s) return;
+  try { await auth.removeLocalEndpoint(id); } catch (e) {
+    console.error('remove server', e);
+    return panelNote(`I couldn't remove ${s.label}. Try again in a moment.`, true);
+  }
+  forgetLocal(id); local.status.delete(id);
+  if (s.custom) { config.localServers = config.localServers.filter((x) => x?.id !== id); saveConfig(); }
+  await refreshAuth();
+  if (config.provider === 'local' && serverFor([s], config.model)) { config.provider = null; config.model = null; ensureModel(); saveConfig(); }
+  agent = null; menu();
+  panelNote(`${s.label} is ${s.custom ? 'removed' : 'disconnected'}.`);
 }
 // Some models run on only one kind of key (Kimi K2.8 Preview on a Kimi Code plan key, MiMo UltraSpeed on API Credits).
-const canRun = (p, id) => !!signedIn.get(p) && getAuthStorageKeys(p, id).some((k) => k === p || storedKeys.has(k));
+const canRun = (p, id) => !!signedIn.get(p) && seesImages(p, id) && getAuthStorageKeys(p, id).some((k) => k === p || storedKeys.has(k));
 const runnable = (p) => getModelsForProvider(p).filter((m) => canRun(p, m.id));
 function ensureModel() {
   if (config.provider && getModel(config.model) && canRun(config.provider, config.model)) return true;
-  // A local model stays picked while Ollama is closed; the request says to open it.
+  // A local model stays picked while its server is closed; the request says to open it.
   if (config.provider === 'local' && parseLocalModelId(config.model ?? '') && signedIn.get('local')) return true;
   const p = ['anthropic', 'openai', 'gemini', ...MENU_PROVIDERS].find((x) => runnable(x).length);
   if (!p) return false;
@@ -380,6 +469,7 @@ const { tools, hands, whereNow, frontNow: frontData, ink, nextTurn } = createToo
   watchClicks: (on) => send({ type: 'watch_clicks', on: !!on }),
   onInkGone: (why) => logLine('ink_gone', { why }),
   askShell: (msg) => shellCall(msg),
+  pointScale: () => pointScale(config.model ?? ''),
   // web_search's side search runs on the chat's own Anthropic sign-in; other providers use the keyless engines.
   sideSearch: async () => {
     if (config.provider !== 'anthropic') return null;
@@ -534,9 +624,9 @@ const livePrompt = (context = '') => {
   lastFactIds = facts.map((f) => f.id);
   const open = commitmentsText(), done = doneTodayText(), working = agents.liveText();
   const turn = `Live state (current as of this moment):
-${frontNow ? `${frontNow}\n` : ''}${focusLine()}- Editing files, running commands and controlling other apps: ${config.allowActions ? 'ALLOWED' : `switched OFF (tell the user to turn on "Allow File Edits & Commands" on the Behavior page in ${PANEL} if they want it)`}.
+${frontNow ? `${frontNow}\n` : ''}${focusLine()}- Editing files, running commands and controlling other apps: ${config.allowActions ? 'ALLOWED' : `switched OFF (tell the user to turn on "Allow File Edits & Commands" on the General page in ${PANEL} if they want it)`}.
 ${VOICE_OK ? `- Voice: ${!config.voice ? 'off' : voiceReady() ? `on; ${HOTKEYS_OK ? `${userName} holds ${talkWords()} to talk` : `${userName} presses the key they bound to ${BIND.talk} to start talking and again to send (a pause sends too)`}${config.autoListen ? '. Auto-listen is on: when your reply to a spoken question ends with a question, the mic opens by itself for their answer' : ''}${MAC && config.wakeWord ? `. Wake word is on: ${userName} can also say "Hey ${wakeName(config)}" to start talking hands-free, and what they say right after it is the request (a request that still starts with "Hey ${wakeName(config)}" is them waking you, not calling you by another name: never correct it)${config.wakeName ? ` (they chose "${config.wakeName}" as the wake word; your own name is unchanged)` : ''}` : ''}` : `on, but the speech model isn't downloaded yet (${voiceModel.status === 'downloading' ? 'downloading now' : `the Voice page in ${PANEL}`})`}.` : ''}
-- Shortcuts: ${HOTKEYS_OK ? `type a question to you: a quick tap of ${writeWords()} (press both and let go), which opens a text field beside the cursor (Enter sends, Shift+Enter adds a line, Esc or another tap closes it); show or hide you ${keyWords(keys().summon)}` : `on this Wayland desktop no app can have global shortcuts, so ${userName} binds keys to these commands in their desktop's keyboard settings: ${BIND.summon} (show or hide you), ${BIND.ask} (ask you), ${BIND.list} (the list), ${BIND.talk} (talk) and ${BIND.panel} (the panel)`}${SNAP_OK ? `; ask about an area ${keyWords(keys().snap)}` : ''}${CIRCLE_OK ? "; while holding the talk keys, moving the cursor round something circles it (no clicking; it snaps shut with a click when the circle closes, and loose lines don't count) and you'll see what they circled" : ''}${HOTKEYS_OK ? `; show the list ${keyWords(keys().list)}` : ''}.${HANDS_OK ? '' : ' Asking about an area, reading app windows, finding things on screen by their words and working other apps need the Roamies app, which isn\'t running here; draw there with x, y from a screenshot.'}`;
+- Shortcuts: ${HOTKEYS_OK ? `${keys().write ? `type a question to you: a quick tap of ${writeWords()} (press both and let go), which opens a text field beside the cursor (Enter sends, Shift+Enter adds a line, Esc or another tap closes it)` : `the tap that opens a text field to type a question is turned off (the Ask button in ${PANEL} still opens it; the Shortcuts page there turns the tap back on)`}; show or hide you ${keyWords(keys().summon)}` : `on this Wayland desktop no app can have global shortcuts, so ${userName} binds keys to these commands in their desktop's keyboard settings: ${BIND.summon} (show or hide you), ${BIND.ask} (ask you), ${BIND.list} (the list), ${BIND.talk} (talk) and ${BIND.panel} (the panel)`}${SNAP_OK ? `; ask about an area ${keyWords(keys().snap)}` : ''}${CIRCLE_OK ? "; while holding the talk keys, moving the cursor round something circles it (no clicking; it snaps shut with a click when the circle closes, and loose lines don't count) and you'll see what they circled" : ''}${HOTKEYS_OK ? `; show the list ${keyWords(keys().list)}` : ''}.${HANDS_OK ? '' : ' Asking about an area, reading app windows, finding things on screen by their words and working other apps need the Roamies app, which isn\'t running here; draw there with x, y from a screenshot.'}`;
   const memory = `${open ? `Open commitments:\n${open}` : 'No open commitments.'}${done ? `\nDone today (ticked off on the list or by you; still shown struck through until midnight):\n${done}` : ''}
 ${facts.length ? `What you know about ${userName}${total > facts.length ? ` (${facts.length} most relevant of ${total})` : ''}:\n${facts.map((f) => `- ${f.id}: ${f.text}`).join('\n')}` : `You don't know anything lasting about ${userName} yet.`}${working ? `\n${working}` : ''}`;
   return { turn, memory };
@@ -934,7 +1024,11 @@ async function readyAgent() {
   if (!ensureModel()) { openPanel('model'); return 'Sign in to an AI provider first: I opened the Model page for you. Then ask me again!'; }
   if (config.provider === 'local') {
     if (!getModel(config.model)) await syncLocal();
-    if (!getModel(config.model)) return ollama.reachable ? `Ollama doesn't have ${parseLocalModelId(config.model)?.rawId ?? 'that model'} anymore. Pick another model on the Model page in ${PANEL}.` : `Ollama isn't running. Open it, then ask me again!`;
+    const s = serverFor(servers(), config.model), r = s && local.status.get(s.id);
+    if (!getModel(config.model)) {
+      if (!s) return `That model's server isn't on the Model page in ${PANEL} anymore. Pick another model there.`;
+      return r?.ok ? `${s.label} doesn't have ${parseLocalModelId(config.model)?.rawId ?? 'that model'} anymore. Pick another model on the Model page in ${PANEL}.` : /rejected/.test(r?.reason ?? '') ? downNote(s, r.reason) : `${downNote(s, r?.reason)} ${s.custom ? 'Start it' : 'Open it'}, then ask me again!`;
+    }
     await measureLocal(config.model);
   }
   if (!session) { session = newSession(config.provider, config.model); liveBlocks.clear(); agent = null; pruneSessions(); }
@@ -1254,6 +1348,7 @@ async function apiKeyLogin(id, given) {
   const baseUrl = variant?.baseUrl ?? meta.apiKeyBaseUrl;
   await auth.setCredentials(variant?.key ?? provider, { accessToken: key.trim(), refreshToken: '', expiresAt: Date.now() + 100 * 365 * 864e5, ...(baseUrl ? { baseUrl } : {}) });
   await refreshAuth(); ensureModel(); agent = null;
+  if (CATALOG_PROVIDERS.includes(provider)) refreshCatalogs(provider);
   // A Gemini key for the AI speaks too, unless the voice has a key of its own.
   if (provider === 'gemini') await syncGeminiVoiceKey();
   menu();
@@ -1267,7 +1362,7 @@ async function signOut(provider) {
   const label = PROVIDER_LABELS[provider] ?? provider;
   if (loggingIn === provider) cancelLogin();
   try {
-    if (provider === 'local') await auth.clearCredentials(OLLAMA_KEY);
+    if (provider === 'local') { for (const x of servers()) { await auth.removeLocalEndpoint(x.id); forgetLocal(x.id); } local.status.clear(); }
     else {
       // Claude Code here is Roamies' own copy, so this signs only Roamies out.
       if (provider === 'anthropic' && await auth.hasClaudeCodeLogin()) await signOutOfClaudeCode(auth);
@@ -1720,7 +1815,15 @@ function panelState() {
     status: busy ? { state: 'busy', text: doing ?? 'Thinking' } : loggingIn ? { state: 'busy', text: loginStatus || `Signing in to ${PROVIDER_LABELS[loggingIn]}` } : current ? { state: 'ready', text: 'Ready' } : { state: 'off', text: 'Not signed in' },
     busy, canNew: !busy && !!session?.messages.length,
     // The type-to-ask shortcut, for the Ask button's tooltip (none on Wayland).
-    askKeys: HOTKEYS_OK ? writeSymbols() : null,
+    askKeys: HOTKEYS_OK ? writeSymbols() || null : null,
+    // The Shortcuts page: the talk pairs, and the other shortcuts as people on this computer say them.
+    shortcuts: HOTKEYS_OK ? {
+      talk: VOICE_OK ? { value: sortMods(keys().talk).join('+'), pairs: talkChords(process.platform).map((c) => [sortMods(c).join('+'), pairWords(c)]) } : null,
+      keys: ['summon', ...(SNAP_OK ? ['snap'] : []), 'list'].map((w) => ({ id: w, words: keyWords(keys()[w]) })),
+    } : null,
+    // The Shortcuts page's type-to-ask pick: the pairs talk isn't using, or off.
+    writeKeys: HOTKEYS_OK ? { value: keys().write ? sortMods(keys().write).join('+') : 'off',
+      pairs: writeChords(process.platform).filter((c) => !samePair(c, keys().talk)).map((c) => [sortMods(c).join('+'), pairWords(c)]) } : null,
     model: current ? { provider: config.provider, id: config.model, name: current.name, providerLabel: PROVIDER_LABELS[config.provider] ?? config.provider } : null,
     providers: MENU_PROVIDERS.map((p) => {
       const meta = AUTH_PROVIDERS.find((x) => x.value === p);
@@ -1733,9 +1836,14 @@ function panelState() {
         signedIn: !!oauthOn.get(p), keySaved: !!meta && apiKeyStorageKeys(p).some((k) => storedKeys.has(k)),
         // Kimi and Xiaomi: which kind of key is being added (plan or pay-per-token).
         kinds: meta && keyKinds(meta).length > 1 ? keyKinds(meta).map(([id, label, billing]) => ({ id, label, billing })) : null,
-        models: on ? runnable(p).slice(0, 24).map((mm) => ({ id: mm.id, name: mm.name })) : [],
-        ...(p === 'local' && on ? { note: !ollama.reachable ? "Ollama isn't running." : runnable(p).length ? '' : "None of Ollama's models can see images. Get one with: ollama pull qwen3.5:4b" } : {}),
+        models: on ? runnable(p).map((mm) => ({ id: mm.id, name: mm.name })) : [],
       };
+    }),
+    // The Model page's local rows: each server, connected or not, and why its models aren't in the menu.
+    localServers: servers().map((x) => {
+      const on = storedKeys.has(`local:${x.id}`), r = local.status.get(x.id);
+      return { id: x.id, label: x.label, custom: !!x.custom, baseUrl: x.custom ? x.baseUrl : null, images: !!x.supportsImages, on,
+        note: !on || !r ? '' : !r.ok ? downNote(x, r.reason) : r.models.length ? '' : noModelsNote(x, r.all, true) };
     }),
     loggingIn,
     recent: activity.recent,
@@ -1751,6 +1859,8 @@ function panelState() {
     studio: tts().local ? studioState() : null,
     voice: VOICE_OK ? {
       on: !!config.voice, keys: HOTKEYS_OK ? talkSymbols() : null, ready: voiceReady(), mac: MAC, mute: config.muteWhileTalking !== false, autoListen: !!config.autoListen, snoozeListen: !!config.snoozeListen, wakeWord: !!config.wakeWord, wakeName: wakeName(config),
+      // The mic picker: what the voice helper lists, the pick ('' is automatic) and the mic automatic uses now.
+      mics: mics.list, mic: config.mic ?? '', micAuto: mics.list.find((x) => x.id === mics.auto)?.name ?? '',
       download: NEEDS_MODEL && config.voice && !voiceReady() ? { status: voiceModel.status, pct: voiceModel.total ? Math.floor((voiceModel.done / voiceModel.total) * 100) : 0, size: sizeLabel() } : null,
     } : null,
     sound: !!config.sound, actions: !!config.allowActions, brief: { on: !!config.morningBrief, todoist: !!config.briefTodoist, canTodoist: HANDS_OK }, focus: HANDS_OK ? { until: focusBlock?.until ?? null, task: focusBlock?.task ?? '', list: distractionList(), custom: !!config.distractions } : null, sync: { dir: config.syncDir || '', at: syncInfo.at, error: syncInfo.error, paused: !!syncInfo.paused },
@@ -1801,6 +1911,9 @@ const startVoiceDownload = () => {
   getVoiceModel();
 };
 const PRIVACY = { microphone: 'Privacy_Microphone', speech: 'Privacy_SpeechRecognition' };
+// The mics the voice helper last listed (asked whenever the panel opens), and the pick sent to it ('' is automatic).
+let mics = { list: [], auto: '' };
+const micPick = () => send({ type: 'voice_mic', id: config.mic ?? '' });
 function onVoice(m) {
   if (m.type === 'voice_state') { voiceBusy = m.state === 'listening' || m.state === 'processing'; stir(); }
   if (m.type === 'voice_state' && m.state === 'listening') { interruptQuietly('listening'); speech.stop(); warmUp(); } // talking over it stops it
@@ -1811,6 +1924,8 @@ function onVoice(m) {
     onSpoken(m.text.trim(), m.area);
   }
   else if (m.type === 'voice_state' && m.state === 'idle' && snap?.waitingVoice) snap.waitingVoice = false;
+  else if (m.type === 'voice_ready') micPick();
+  else if (m.type === 'voice_mics') { mics = cleanMics(m); panel(); }
   else if (m.type === 'voice_error') {
     if (m.code === 'nothing_heard' && snap) { snap.waitingVoice = false; return; }
     if (m.code === 'model_missing') startVoiceDownload();
@@ -1843,7 +1958,7 @@ async function onCli(action) {
   if (action === 'list') return showList({ seconds: 20, toggle: true });
   if (action === 'ask') return onMenu('ask');
   if (action !== 'talk' || !VOICE_OK) return;
-  if (!config.voice) return say(`Voice is off. Switch it on on the Voice page in ${PANEL}.`, 'happy');
+  if (!config.voice) return say(`Voice is off. Switch it on on the Listening page in ${PANEL}.`, 'happy');
   if (!voiceReady()) return startVoiceDownload();
   send({ type: 'talk_toggle' });
 }
@@ -1908,13 +2023,20 @@ async function onMenu(id, via) {
   }
   else if (id.startsWith('model:')) {
     const [, p, ...rest] = id.split(':');
+    if (!canRun(p, rest.join(':'))) return;
     config.provider = p; config.model = rest.join(':'); agent = null; saveConfig(); menu();
     say(`Switched to ${getModel(config.model)?.name ?? config.model}.`, 'happy');
     if (p === 'local') measureLocal(config.model).catch(() => {});
+  } else if (id.startsWith('write:') && HOTKEYS_OK) keysFromPanel({ write: id === 'write:off' ? 'off' : id.slice(6).split('+') }); // #65
+  else if (id.startsWith('talk:') && HOTKEYS_OK) keysFromPanel({ talk: id.slice(5).split('+') });
+  else if (id.startsWith('shortcut:') && HOTKEYS_OK) {
+    const [, which, accel] = id.split(':');
+    if (['summon', 'snap', 'list'].includes(which)) keysFromPanel({ [which]: accel });
   } else if (id.startsWith('login:')) oauthLogin(id.slice(6));
   else if (id.startsWith('key:')) apiKeyLogin(id.slice(4));
   else if (id.startsWith('signout:')) signOut(id.slice(8));
-  else if (id === 'local:connect') connectOllama();
+  else if (id.startsWith('local:connect:')) connectServer(id.slice(14));
+  else if (id.startsWith('local:remove:')) removeServer(id.slice(13));
   else if (id.startsWith('size:') && SIZES.some(([s]) => s === id.slice(5))) { config.size = id.slice(5); saveConfig(); ui({ kind: 'size', size: config.size }); menu(); }
   else if (id.startsWith('look:')) setLook(id.slice(5));
   else if (id === 'replies:text') setReplies('text');
@@ -1978,6 +2100,7 @@ async function onMenu(id, via) {
   else if (id === 'intro') send({ type: 'onboarding', mode: 'chat' });
   else if (id === 'snap') areaSnap();
   else if (id === 'list') showList({ seconds: 20 });
+  else if (id.startsWith('mic:') && VOICE_OK) { config.mic = id.slice(4, 304); saveConfig(); micPick(); menu(); }
   else if (id === 'mutetalk') { config.muteWhileTalking = config.muteWhileTalking === false; saveConfig(); voiceConfig(); menu(); }
   else if (id === 'autolisten') { config.autoListen = !config.autoListen; saveConfig(); menu(); }
   else if (id === 'snoozelisten') { config.snoozeListen = !config.snoozeListen; saveConfig(); menu(); }
@@ -2191,31 +2314,13 @@ async function onGuide(m) {
   else if (m.type === 'ob_look') setLook(m.look);
   else if (m.type === 'ob_size' && SIZES.some(([s]) => s === m.size)) { config.size = m.size; saveConfig(); ui({ kind: 'size', size: config.size }); menu(); }
   else if (m.type === 'set_keys') {
-    const now = keys(), next = { ...now };
-    // Talk and type-to-ask never share a pair: picking the pair the other one has swaps the two.
-    if (m.talk !== undefined) {
-      if (!validTalk(m.talk)) return ob({ kind: 'keys', keys: keys(), error: 'Pick two different modifier keys.' });
-      if (samePair(m.talk, now.write)) next.write = now.talk;
-      next.talk = m.talk;
-    }
-    if (m.write !== undefined) {
-      if (!writeChords(process.platform).some((c) => samePair(c, m.write))) return ob({ kind: 'keys', keys: keys(), error: 'Pick one of the pairs shown.' });
-      if (samePair(m.write, next.talk)) next.talk = now.write;
-      next.write = m.write;
-    }
-    for (const which of ['summon', 'snap', 'list']) {
-      if (m[which] === undefined) continue;
-      if (!validSummon(m[which])) return ob({ kind: 'keys', keys: keys(), error: 'Use at least one of Control, Option or Command, plus a key.' });
-      if (['summon', 'snap', 'list'].some((o) => o !== which && m[which] === next[o])) return ob({ kind: 'keys', keys: keys(), error: 'That shortcut is already used for something else here.' });
-      next[which] = m[which];
-    }
-    keysBefore = keys();
-    config.keys = next; saveConfig(); sendKeys(); menu();
-    ob({ kind: 'keys', keys: keys() });
+    const error = applyKeys(m);
+    ob({ kind: 'keys', keys: keys(), ...(error ? { error } : {}) });
   } else if (m.type === 'keybind_error') {
     // The OS refused the new show/hide shortcut (another app owns it): put the old one back.
-    if (keysBefore && ['summon', 'snap', 'list'].includes(m.which)) { config.keys = { ...keys(), [m.which]: keysBefore[m.which] }; saveConfig(); sendKeys(); menu(); }
+    if (keysBefore && ['summon', 'snap', 'list'].includes(m.which)) saveKeys({ ...keys(), [m.which]: keysBefore[m.which] });
     ob({ kind: 'keys', keys: keys(), error: 'Another app already uses that shortcut. Try a different one.' });
+    panelNote('Another app already uses that shortcut. Try a different one.', true);
   } else if (m.type === 'ob_done') {
     config.onboarded = true; config.onboardStep = 0; config.setupVersion = SETUP_VERSION; saveConfig();
   }
@@ -2226,7 +2331,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   let m;
   try { m = JSON.parse(line); } catch { return; }
   if (m.type === 'menu') onMenu(m.id, m.via).catch((e) => console.error('menu', e));
-  else if (m.type === 'panel_open') { panelOpen = true; panelAt = Date.now(); logLine('panel_open', {}); Promise.all([refreshAuth(), signedIn.get('local') && syncLocal(), tts().local && speech.checkLocal()]).catch(() => {}).finally(() => panel()); }
+  else if (m.type === 'panel_open') { panelOpen = true; panelAt = Date.now(); logLine('panel_open', {}); if (VOICE_OK) send({ type: 'voice_mics' }); Promise.all([refreshAuth(), signedIn.get('local') && syncLocal(), tts().local && speech.checkLocal()]).catch(() => {}).finally(() => { panel(); refreshCatalogs(); }); }
   else if (m.type === 'diagnostics') { shellInfo?.(m); shellInfo = null; }
   else if (m.type === 'panel_closed') { panelOpen = false; logLine('panel_closed', { why: String(m.why ?? ''), ms: Date.now() - panelAt }); }
   else if (m.type === 'panel_key' && typeof m.provider === 'string' && typeof m.key === 'string') {
@@ -2235,6 +2340,8 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     if (storageKeyProvider(id) !== m.provider) return;
     apiKeyLogin(id, m.key.slice(0, 1000)).then(() => panelNote(signedIn.get(m.provider) ? `${label} is connected.` : `That ${label} key didn't work.`, !signedIn.get(m.provider)))
       .catch((e) => { const p = problem('key', e, { store: KEY_STORE }); panelNote(p.text, true, p); });
+  } else if (m.type === 'panel_local_add' && typeof m.label === 'string' && typeof m.baseUrl === 'string') {
+    addServer({ label: m.label.slice(0, 200), baseUrl: m.baseUrl.slice(0, 500), key: typeof m.key === 'string' ? m.key.trim().slice(0, 1000) : '', images: m.images === true }).catch((e) => console.error('add server', e));
   } else if ((m.type === 'panel_fishkey' || m.type === 'panel_geminikey') && typeof m.key === 'string') voiceKeyLogin({ provider: m.type === 'panel_geminikey' ? 'gemini' : 'fish', given: m.key.slice(0, 1000), note: panelNote }).catch((e) => console.error('voice key', e));
   else if (m.type === 'answer') { pending.get(m.id)?.(m.text ?? null); pending.delete(m.id); }
   else if (m.type === 'ui_ready') {
@@ -2309,9 +2416,11 @@ let retired = (async () => {
 })();
 await retired;
 await refreshAuth();
-// Before ensureModel, so a local model that's picked is still there.
+// Before ensureModel, so a local model that's picked is still there (and an OpenRouter or OpenCode one).
 if (signedIn.get('local')) await syncLocal();
+await catalogs.load();
 ensureModel();
+refreshCatalogs();
 // The first request after launch gets a warm Claude Code too.
 if (config.onboarded) warmUp();
 // Due commitments turn into a nudge, but only when Sidekick isn't mid-conversation.

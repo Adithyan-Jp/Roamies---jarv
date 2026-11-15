@@ -1,6 +1,23 @@
 {
   "updates": [
     {
+      "version": null,
+      "date": "2026-11-15",
+      "items": [
+        { "kind": "new", "title": "More local servers", "text": "Run me on LM Studio or any OpenAI compatible server, not just Ollama." },
+        { "kind": "new", "title": "Pick your microphone", "text": "Choose which mic I listen on, or leave it on automatic." },
+        { "kind": "new", "title": "Change your shortcuts", "text": "A new Shortcuts page lets you change your talk keys and other shortcuts anytime." },
+        { "kind": "new", "title": "Turn off the ask tap", "text": "The quick tap to type a question can be switched off if another app uses it." },
+        { "kind": "improved", "title": "Tidier settings", "text": "Voice and Behavior are now Speaking, Listening, Shortcuts, Routines and General." },
+        { "kind": "improved", "title": "Every OpenRouter model", "text": "I now list all OpenRouter and OpenCode models, not just a handful." },
+        { "kind": "improved", "title": "Qwen points in the right spot", "text": "Local Qwen models now point at the right place on your screen." },
+        { "kind": "improved", "title": "Only models that can see", "text": "Models that can't see your screen no longer show up in the model list." },
+        { "kind": "fixed", "title": "Background noise", "text": "A fan or TV could keep me listening for a whole minute. Not anymore. Thanks JavierOIayo!" },
+        { "kind": "fixed", "title": "Installs next to Node on Linux", "text": "On Linux, installing me failed if you already had Node. Fixed. Thanks namedtwilit!" },
+        { "kind": "fixed", "title": "Esc works again on Linux", "text": "On Linux, Esc could stop working in other apps after using me. Thanks namedtwilit!" }
+      ]
+    },
+    {
       "version": "0.1.39",
       "date": "2026-11-14",
       "items": [

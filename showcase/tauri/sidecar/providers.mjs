@@ -2,7 +2,10 @@
 // A provider that takes a plan key and a pay-per-token key (Kimi, Xiaomi) gets a card for each: they're
 // stored apart, and each works only on its own endpoint.
 
-import { apiKeyStorageKeys, providerStorageKeys } from '@kenkaiiii/gg-core';
+import { apiKeyStorageKeys, getModelsForProvider, providerStorageKeys } from '@kenkaiiii/gg-core';
+
+/** Roamies reads screenshots, so a model that can't see images is never offered, picked or kept. */
+export const seesImages = (provider, id) => !!getModelsForProvider(provider).find((m) => m.id === id)?.supportsImages;
 
 /** Everywhere a provider's sign-in and keys are saved, so removing it from Roamies leaves none behind. */
 export const accountKeys = (provider) => [...new Set([...providerStorageKeys(provider), ...apiKeyStorageKeys(provider)])];

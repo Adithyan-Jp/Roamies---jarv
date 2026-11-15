@@ -1,7 +1,7 @@
 // What the setup guide offers to connect. Run: npm test
 import assert from 'node:assert/strict';
 import { AUTH_PROVIDERS, apiKeyStorageKeys, getAuthStorageKeys, getModelsForProvider, storageKeyProvider } from '@kenkaiiii/gg-core';
-import { KEY_LINKS, keyCards, keyKinds, signInCards } from '../providers.mjs';
+import { KEY_LINKS, keyCards, keyKinds, seesImages, signInCards } from '../providers.mjs';
 import { SAFE, checkLink } from '../safety.mjs';
 
 const cards = signInCards(['anthropic', 'openai'], (id) => id === 'openai');
@@ -56,4 +56,15 @@ console.log('providers ok');
   }
   assert.deepEqual(await auth.listProviders(), [], 'nothing left behind');
   await fs.rm(dir, { recursive: true, force: true });
+}
+
+// Roamies reads screenshots: models that can't see images are left out, and every provider keeps one that can.
+assert.equal(seesImages('glm', 'glm-5.3'), false, 'GLM 5.3 reads text only');
+assert.equal(seesImages('deepseek', 'deepseek-v4-pro'), false);
+assert.equal(seesImages('opencode', 'opencode/glm-5.3'), false);
+assert.equal(seesImages('anthropic', 'glm-5.3'), false, 'checked against the provider asked about');
+assert.equal(seesImages('glm', 'no-such-model'), false);
+for (const p of AUTH_PROVIDERS.map((x) => x.value)) {
+  const models = getModelsForProvider(p);
+  if (models.length) assert.ok(models.some((m) => seesImages(p, m.id)), `${p}: has a model that can see images`);
 }

@@ -1,6 +1,16 @@
 // Screenshots reach the model resized (Retina pixels, then capped), so its x/y are image pixels, not screen points.
-export function shotMap([x, y, w, h], imgW, imgH) {
-  return { origin: [x, y], sx: w / imgW, sy: h / imgH, size: [imgW, imgH] };
+// scale 'norm1000': the model answers on a 0–1000 grid over the image whatever its size (Qwen3-VL, Qwen3.5), so
+// size is that grid and the bounds checks match it.
+export function shotMap([x, y, w, h], imgW, imgH, scale = 'pixels') {
+  const [gw, gh] = scale === 'norm1000' ? [1000, 1000] : [imgW, imgH];
+  return { origin: [x, y], sx: w / gw, sy: h / gh, size: [gw, gh], scale };
+}
+
+/** What a screenshot's result says about giving x, y: its size, and image pixels or the 0–1000 grid. */
+export function shotUnits(imgW, imgH, scale = 'pixels', use = 'draw or click_at') {
+  return scale === 'norm1000'
+    ? ` (${imgW}×${imgH} px; for ${use} give x, y on a 0–1000 grid over this image, not pixels: 0, 0 is its top left corner and 1000, 1000 its bottom right. Wherever a tool says screenshot pixels, use this grid, for w, h too)`
+    : ` (${imgW}×${imgH} px; for ${use} give x, y in this image's pixels)`;
 }
 
 /** Whether a picture of imgW×imgH can show the area [x, y, w, h]: resizing keeps the shape, so a different shape
