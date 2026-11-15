@@ -5,7 +5,8 @@
       "date": "2026-11-15",
       "items": [
         { "kind": "new", "title": "Deep explanations", "text": "Ask me to explain something in depth: big cards, one step at a time. Thanks LeoU29935!" },
-        { "kind": "new", "title": "Game mode", "text": "In fullscreen games I move to a panel at the screen's edge. Thanks LeoU29935!" }
+        { "kind": "new", "title": "Game mode", "text": "In fullscreen games I move to a panel at the screen's edge. Thanks LeoU29935!" },
+        { "kind": "fixed", "title": "On top on COSMIC", "text": "On COSMIC I now stay on top of your apps, without the dark box. Thanks Swall-wg!" }
       ]
     },
     {
