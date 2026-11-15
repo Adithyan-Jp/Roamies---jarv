@@ -1,6 +1,14 @@
 {
   "updates": [
     {
+      "version": "0.1.41",
+      "date": "2026-11-15",
+      "items": [
+        { "kind": "new", "title": "Deep explanations", "text": "Ask me to explain something in depth: big cards, one step at a time. Thanks LeoU29935!" },
+        { "kind": "new", "title": "Game mode", "text": "In fullscreen games I move to a panel at the screen's edge. Thanks LeoU29935!" }
+      ]
+    },
+    {
       "version": "0.1.40",
       "date": "2026-11-15",
       "items": [
