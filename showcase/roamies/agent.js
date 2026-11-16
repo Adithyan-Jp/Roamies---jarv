@@ -167,7 +167,7 @@
     const ORDER = ['materialize', 'crt', 'drop'];
     const forcedVariant = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('enter') : null;
     // ptr: the real cursor whenever it's on this screen (even when it hasn't moved for a while), else null.
-    const presence = { auto: false, idle: 1.5, summonIdle: 4.5, lastActive: 0, summoned: false, cursor: null, ptr: null, n: 0 };
+    const presence = { auto: false, idle: 1.5, summonIdle: 4.5, lastActive: 0, summoned: false, working: false, cursor: null, ptr: null, n: 0 };
     let SAFE = R.safe;
     // The visible screen: overlay minus menu bar / Dock / taskbar.
     const bounds = () => ({ l: SAFE.left, t: SAFE.top, r: W - SAFE.right, b: H - SAFE.bottom });
@@ -965,6 +965,8 @@
         station.moving = false; station.flee = 0; station.quietUntil = now + 1;
       },
       setAuto: (on, idle) => { presence.auto = !!on; if (idle) presence.idle = idle; presence.lastActive = now; },
+      // A request is in progress: the Sidekick stays up for the whole turn, between its thoughts, tools and replies.
+      working: (on) => { presence.working = !!on; presence.lastActive = now; },
       get visible() { return visible(); },
       // The speech bubble is still typing its words out.
       typing: () => !!b && b.kind === 'speech' && b.shown < b.text.length,
@@ -1164,7 +1166,7 @@
         const onStage = stage();
         if (presence.auto) {
           const hover = env.mouse?.active && Math.hypot(env.mouse.x - m.x, env.mouse.y - m.y) < k.R * 1.5;
-          const busyNow = b || dying.length || tool || pen.held || now < actUntil || m.dragging || m.flung || hover || k.presence === 'in' || R.panel?.working;
+          const busyNow = b || dying.length || tool || pen.held || now < actUntil || m.dragging || m.flung || hover || k.presence === 'in' || R.panel?.working || presence.working;
           if (busyNow) presence.lastActive = now;
           const idleFor = presence.summoned ? presence.summonIdle : presence.idle;
           if (k.presence === 'shown' && now - presence.lastActive > idleFor) { presence.summoned = false; k.vanish(nextVariant()); }
