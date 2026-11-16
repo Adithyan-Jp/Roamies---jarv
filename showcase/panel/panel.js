@@ -350,7 +350,7 @@
   function recentList() {
     const { box, nav } = paged('recent', state.recent, (r) => el('li', { className: `item ${r.kind}` },
       el('span', { className: 'mark', 'aria-hidden': 'true' }),
-      el('span', { className: 'text', textContent: r.kind === 'ask' ? `“${r.text}”` : r.text, title: r.text }),
+      el('span', { className: 'text', dir: 'auto', textContent: r.kind === 'ask' ? `“${r.text}”` : r.text, title: r.text }),
       el('span', { className: 'meta', textContent: ago(r.at) })), { label: 'Recent' });
     return [
       el('div', { className: 'group paged' }, el('div', { className: 'ghead' }, el('h2', { textContent: 'Recent' })), box),
@@ -427,7 +427,7 @@
     const f = state.facts, q = ui.q.trim().toLowerCase();
     const hits = q ? f.filter((x) => x.text.toLowerCase().includes(q)) : f;
     const { box, nav } = paged('facts', hits, (x) => el('li', { className: 'item mem' },
-      el('span', { className: 'text', textContent: x.text, title: x.text }),
+      el('span', { className: 'text', dir: 'auto', textContent: x.text, title: x.text }),
       el('span', { className: 'row-btns icons' }, iconArmed('x', 'Forget', `forget:${x.id}`, `forget:${x.id}`, `Forget: ${x.text}`))), { label: 'What I remember', empty: q ? `No match for "${ui.q.trim()}".` : EMPTY, id: 'facts-box' });
     // Search once there's more than a page: it looks through all of them, and the pages follow the matches.
     const search = f.length > (ui.per.facts ?? 8) || q ? el('div', { className: 'find' }, el('span', { className: 'px field' },
@@ -449,7 +449,7 @@
   }
   function commitList() {
     const { box, nav } = paged('commits', state.commitments, (x) => el('li', { className: 'item mem' },
-      el('span', { className: 'text', title: x.text }, x.text, x.when ? el('small', { className: x.overdue ? 'late' : '', textContent: x.overdue ? `Overdue · ${x.when}` : x.when }) : null),
+      el('span', { className: 'text', dir: 'auto', title: x.text }, x.text, x.when ? el('small', { className: x.overdue ? 'late' : '', textContent: x.overdue ? `Overdue · ${x.when}` : x.when }) : null),
       el('span', { className: 'row-btns icons' },
         iconArmed('tick', 'Done', `done:${x.id}`, `done:${x.id}`, `Done: ${x.text}`),
         iconArmed('x', 'Drop', `drop:${x.id}`, `drop:${x.id}`, `Drop: ${x.text}`))), { label: 'Commitments' });

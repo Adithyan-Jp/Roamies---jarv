@@ -8,7 +8,7 @@
   if (!R || typeof document === 'undefined') return;
 
   // ---------------------------------------------------------------- look
-  const P = 4, MONO = '"Martian Mono", ui-monospace, monospace', DOTO = '"Doto", "Martian Mono", ui-monospace, monospace';
+  const P = 4, MONO = '"Martian Mono", "Roamies Arabic", ui-monospace, monospace', DOTO = '"Doto", "Martian Mono", "Roamies Arabic", ui-monospace, monospace';
   const ACC = '#78ffe2', HOT = '#e6fffa', MID = '#28c4b8', DEEP = '#0e5c60', EDGE = 'rgba(3,39,34,0.6)';
   const GLASS = 'rgba(6,22,24,0.94)', TEXT = '#dcfff6', DIM = '#8ab8b0', INKDARK = '#032722';
   const TONES = { accent: ACC, teal: '#78ffe2', amber: '#ffcf5c', coral: '#ff8a7a', lilac: '#b9a4ff', sky: '#7cc8ff', lime: '#b6f36b', red: '#ff6b6b', white: '#e8fffa' };
@@ -247,7 +247,7 @@
   // Words typing themselves in; the last couple land white.
   function typed(c, str, x, y, font, color, u, o = {}) {
     str = String(str ?? '');
-    c.save(); c.font = font; c.textBaseline = o.baseline || 'alphabetic'; c.textAlign = 'left';
+    c.save(); c.font = R.rtlFont(str, font); c.textBaseline = o.baseline || 'alphabetic'; c.textAlign = 'left';
     const full = c.measureText(str).width, x0 = o.anchor === 'middle' ? x - full / 2 : o.anchor === 'end' ? x - full : x;
     // With reduced motion the words are simply there.
     const n = reduced() ? str.length : Math.floor(str.length * clamp(u, 0, 1));
