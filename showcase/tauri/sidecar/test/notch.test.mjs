@@ -17,13 +17,13 @@ assert.equal(pickNotch({ mac: true, notchScreen: true, pick: 'nonsense' }), 'off
 const noop = () => {};
 const els = [];
 function node(tag) {
-  const attrs = {}, kids = [];
+  const attrs = {}, kids = [], found = {};
   const base = {
-    tag, attrs, style: { setProperty: noop }, dataset: {}, textContent: '', hidden: false, isConnected: true, width: 0, height: 0,
+    tag, attrs, style: { set: [], setProperty(k, v) { this.set.push([k, v]); } }, dataset: {}, textContent: '', hidden: false, isConnected: true, width: 0, height: 0,
     classList: { set: new Set(), add(...c) { c.forEach((x) => this.set.add(x)); }, remove(...c) { c.forEach((x) => this.set.delete(x)); }, contains(c) { return this.set.has(c); }, toggle(c, on) { if (on ?? !this.set.has(c)) this.set.add(c); else this.set.delete(c); return this.set.has(c); } },
     setAttribute(k, v) { attrs[k] = String(v); }, getAttribute: (k) => attrs[k] ?? null,
     getBoundingClientRect: () => ({ left: 0, top: 0, right: 500, bottom: 60, width: 500, height: 60 }),
-    querySelector: () => node('div'), querySelectorAll: () => [], appendChild: (c) => kids.push(c), append: (...c) => kids.push(...c),
+    querySelector: (q) => (found[q] ??= node('div')), querySelectorAll: () => [], appendChild: (c) => kids.push(c), append: (...c) => kids.push(...c),
     addEventListener: noop, animate: () => ({ cancel: noop }), getAnimations: () => [], getContext: () => new Proxy({}, { get: () => noop }),
     scrollHeight: 0, offsetHeight: 0, offsetWidth: 0,
   };
@@ -31,11 +31,12 @@ function node(tag) {
   return base;
 }
 const document = { head: node('head'), body: node('body'), createElement: node, addEventListener: noop, fonts: null };
-const timers = [];
+const timers = [], rafs = [];
+const frames = (n = 3) => { for (let i = 0; i < n; i++) rafs.splice(0).forEach((f) => f(0)); };
 const ctx = {
   window: {}, document, Math, performance, innerWidth: 1512, innerHeight: 982, devicePixelRatio: 2,
   matchMedia: () => ({ matches: true, addEventListener: noop }), addEventListener: noop,
-  requestAnimationFrame: () => 0, cancelAnimationFrame: noop, setTimeout: (f) => { timers.push(f); return 0; }, clearTimeout: noop,
+  requestAnimationFrame: (f) => { rafs.push(f); return rafs.length; }, cancelAnimationFrame: noop, setTimeout: (f) => { timers.push(f); return 0; }, clearTimeout: noop,
   getComputedStyle: () => ({}),
 };
 ctx.window.Roamie = { safe: { top: 38, notch: { x: 666, w: 180, h: 38 } }, wake: noop };
@@ -65,4 +66,12 @@ flush();
 assert.equal(sr.textContent, 'Run npm test?');
 assert.equal(R.notchHit(100, 20), true, 'Allow buttons take clicks');
 assert.equal(R.notchHit(900, 20), false, 'outside it, never');
+// A line said while it's closed ("I heard you…") is measured once it's open, so its card fits it (it kept the last
+// reply's height, and lost its bottom padding).
+R.notch.close(); flush(); frames();
+const card = capsule.querySelector('.nc-body');
+card.style.set.length = 0;
+R.notch.say("I heard you, but didn't catch any words.");
+frames();
+assert.ok(card.style.set.some(([k]) => k === '--bh'), 'the card is sized for the line');
 console.log('notch tests: passed');

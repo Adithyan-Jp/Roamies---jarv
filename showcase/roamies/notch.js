@@ -5,7 +5,7 @@
 // same renderer as the sidekick), what it's doing, and the reply as it streams.
 // Two styles (R.notch.style): 'drop' (the default) is a capsule that pours out of the notch like water, a liquid
 // neck stretching and splitting off with a couple of droplets, floats just under the notch and plays with the cursor
-// (leans toward it, the lens watches it, a click folds the reply away or opens it again), then rises back and melts
+// (the lens watches it, a click folds the reply away or opens it again), then rises back and melts
 // into the notch the same way. 'spread' widens sideways out of the notch instead.
 // The lens shows whichever look is picked (JARVIS's globe, a person, or the Roamie blob). While it speaks, a true
 // waveform of its own voice (voice-out.js samples) runs in the status slot; while it listens, one that follows the mic.
@@ -27,7 +27,7 @@
   // Fillet where the capsule meets the top edge, flowing into the screen like the notch's own corners.
   const FILLET = 9;
   // Compact: the notch plus a wing either side for the globe and the status. Open: wide enough to read.
-  const WING = 88, OPEN_W = 440, MAX_BODY = 7 * 19;
+  const WING = 88, OPEN_W = 440, MAX_BODY = 7 * 20;
   // Drop: the pill's height, and how far below the notch it floats.
   // GAP is past the goo's reach, so the neck always breaks once the pill has settled.
   const DROP_ROW = 40, GAP = 15;
@@ -35,19 +35,24 @@
   const css = `
 .nc { --ink: ${INK}; --ink-2: rgba(220,255,246,.62); --ink-3: rgba(220,255,246,.38); --accent: ${ACCENT};
   --w: 180px; --h: 32px; --r: 0px; --f: ${FILLET}px;
-  --y: 0px; --mx: 0px; --sc: 1; --gl: .4; --gr: .4; --glow-a: #6fd6ff; --glow-b: #2a6bff;
+  --y: 0px; --sc: 1; --gl: .4; --gr: .4; --glow-a: #6fd6ff; --glow-b: #2a6bff;
   position: fixed; top: var(--y); left: 50%; z-index: 9; box-sizing: border-box; width: var(--w); height: var(--h);
-  translate: -50% 0; transform: translateX(var(--mx)) scale(var(--sc)); transform-origin: 50% 0;
+  translate: -50% 0; transform: scale(var(--sc)); transform-origin: 50% 0;
   /* Centred with the translate property, not inside transform: the jelly squash (the scale property) runs before
      translate, so the capsule stays centred on the notch at every size. */ background: #000; color: var(--ink); border-radius: 0 0 var(--r) var(--r);
-  font: 500 12px/19px "Martian Mono", ui-monospace, Menlo, monospace; letter-spacing: -.01em;
+  font: 400 12.5px/20px "Martian Mono", ui-monospace, Menlo, monospace;
   pointer-events: none; visibility: hidden; contain: layout style;
-  transition: width .46s cubic-bezier(.22, 1, .36, 1), height .4s cubic-bezier(.22, 1, .36, 1), border-radius .4s cubic-bezier(.22, 1, .36, 1),
-    top .6s cubic-bezier(.3, 1.35, .5, 1), --glow-a .6s ease, --glow-b .6s ease; }
+  transition: --w .46s cubic-bezier(.22, 1, .36, 1), --h .4s cubic-bezier(.22, 1, .36, 1), --r .4s cubic-bezier(.22, 1, .36, 1),
+    top .6s cubic-bezier(.3, 1.35, .5, 1), transform .25s cubic-bezier(.2, .8, .2, 1), box-shadow .35s ease, --glow-a .6s ease, --glow-b .6s ease; }
+/* The size is animated through these (not width and height), so what's sized from them (the card, the glow's outline)
+   follows the shape frame by frame. */
+@property --w { syntax: '<length>'; inherits: true; initial-value: 180px; }
+@property --h { syntax: '<length>'; inherits: true; initial-value: 32px; }
+@property --r { syntax: '<length>'; inherits: true; initial-value: 0px; }
 .nc.on { visibility: visible; }
 .nc.hot { pointer-events: auto; cursor: default; }
 /* Folding back: no spring, it should look like it's being drawn in. */
-.nc.closing { transition: width .34s cubic-bezier(.55, 0, .75, .2) .12s, height .3s cubic-bezier(.5, 0, .7, .3), border-radius .3s ease-in,
+.nc.closing { transition: --w .34s cubic-bezier(.55, 0, .75, .2) .12s, --h .3s cubic-bezier(.5, 0, .7, .3), --r .3s ease-in,
   top .42s cubic-bezier(.6, 0, .8, .35) .08s, transform .2s ease; }
 /* Drop: a floating pill, no fillets (the neck joins it to the notch instead), a shadow to lift it off the page. */
 .nc.drop::before, .nc.drop::after { display: none; }
@@ -60,15 +65,21 @@
 .nc.drop .nc-row { display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px; padding: 0 18px; }
 .nc.drop .nc-mark { justify-self: start; }
 .nc.drop .nc-status { justify-self: end; color: #fff; }
-/* The pill never changes shape: the reply and Allow prompts open in their own card that drops out just below it. */
-.nc.drop .nc-body { top: calc(var(--row) + 8px); left: 50%; right: auto; width: var(--bw, 440px); padding: 14px 20px 16px;
-  height: 0; overflow: hidden; box-sizing: border-box;
+/* The pill never changes shape: the reply and Allow prompts open in their own card. Closed, the card is the pill's
+   size, tucked under it; it slides down out of the pill as it widens and grows, and goes back up the same way. The
+   text keeps its final width, so it doesn't re-wrap while the card grows. */
+.nc.drop .nc-body { top: calc(var(--row) + 8px); left: 50%; right: auto; width: var(--w); padding: 14px 20px 16px;
+  height: var(--row); overflow: hidden; box-sizing: border-box; opacity: 0;
   background: #000; border-radius: 22px; pointer-events: none;
   box-shadow: 0 14px 36px rgba(0, 0, 0, .34), 0 2px 6px rgba(0, 0, 0, .3), 0 0 0 1px rgba(120, 190, 255, .07), inset 0 1px 0 rgba(255, 255, 255, .06);
-  transform: translateX(-50%) translateY(-12px) scale(.96); transform-origin: 50% 0;
-  transition: opacity .16s ease, transform .4s cubic-bezier(.22, 1, .36, 1), height .24s cubic-bezier(.4, 0, .2, 1); }
-.nc.drop.full .nc-body { transform: translateX(-50%); pointer-events: auto;
-  height: var(--bh, auto); transition: opacity .12s ease, transform .4s cubic-bezier(.22, 1, .36, 1), height .3s cubic-bezier(.22, 1, .36, 1); }
+  transform: translateX(-50%) translateY(calc(-8px - var(--row))); transform-origin: 50% 0;
+  transition: opacity .12s ease .2s, width .32s cubic-bezier(.4, 0, .2, 1), height .3s cubic-bezier(.4, 0, .2, 1), transform .32s cubic-bezier(.4, 0, .2, 1); }
+.nc.drop.full .nc-body { width: var(--bw, 440px); height: var(--bh, auto); transform: translateX(-50%); opacity: 1; pointer-events: auto;
+  transition: opacity .1s ease, width .44s cubic-bezier(.22, 1, .36, 1), height .4s cubic-bezier(.22, 1, .36, 1), transform .52s cubic-bezier(.3, 1.25, .5, 1); }
+.nc.drop .nc-text { width: calc(var(--bw, 440px) - 40px); }
+/* The pill (its black, glow and contents) stays above the card while it slides out from under it. */
+.nc.drop .nc-skin, .nc.drop .nc-row { z-index: 1; }
+.nc.drop .nc-skin { background: #000; }
 .nc.drop .nc-globe { width: 30px; height: 30px; border-radius: 50%; background: radial-gradient(circle, #0b1626 0, #000 72%);
   box-shadow: 0 0 0 2px #070a12, 0 0 0 3.5px rgba(255, 255, 255, .08), inset 0 0 6px #000; }
 
@@ -80,6 +91,22 @@
 .nc-skin { position: absolute; inset: 0; border-radius: inherit; overflow: hidden; pointer-events: none; opacity: 0; transition: opacity .3s ease .14s; }
 .nc.compact .nc-skin, .nc.full .nc-skin { opacity: 1; }
 .nc.closing .nc-skin { opacity: 0; transition: opacity .12s ease; }
+/* Notch style: the light fills the whole outline, the flares where it meets the top edge included (the skin reaches
+   over them and is cut to the outline: flares, sides, rounded bottom corners). Above the flares' own black. */
+.nc:not(.drop) .nc-skin { left: calc(-1 * var(--f)); right: calc(-1 * var(--f)); border-radius: 0; z-index: 1;
+  -webkit-mask: radial-gradient(circle at 0 100%, transparent calc(var(--f) - .5px), #000 var(--f)) 0 0 / var(--f) var(--f) no-repeat,
+    radial-gradient(circle at 100% 100%, transparent calc(var(--f) - .5px), #000 var(--f)) 100% 0 / var(--f) var(--f) no-repeat,
+    linear-gradient(#000, #000) var(--f) 0 / calc(100% - 2 * var(--f)) calc(100% - var(--r) + 1px) no-repeat,
+    linear-gradient(#000, #000) calc(var(--f) + var(--r)) 100% / calc(100% - 2 * var(--f) - 2 * var(--r)) var(--r) no-repeat,
+    radial-gradient(circle at 100% 0, #000 calc(var(--r) - .5px), transparent var(--r)) var(--f) 100% / var(--r) var(--r) no-repeat,
+    radial-gradient(circle at 0 0, #000 calc(var(--r) - .5px), transparent var(--r)) calc(100% - var(--f)) 100% / var(--r) var(--r) no-repeat;
+  mask: radial-gradient(circle at 0 100%, transparent calc(var(--f) - .5px), #000 var(--f)) 0 0 / var(--f) var(--f) no-repeat,
+    radial-gradient(circle at 100% 100%, transparent calc(var(--f) - .5px), #000 var(--f)) 100% 0 / var(--f) var(--f) no-repeat,
+    linear-gradient(#000, #000) var(--f) 0 / calc(100% - 2 * var(--f)) calc(100% - var(--r) + 1px) no-repeat,
+    linear-gradient(#000, #000) calc(var(--f) + var(--r)) 100% / calc(100% - 2 * var(--f) - 2 * var(--r)) var(--r) no-repeat,
+    radial-gradient(circle at 100% 0, #000 calc(var(--r) - .5px), transparent var(--r)) var(--f) 100% / var(--r) var(--r) no-repeat,
+    radial-gradient(circle at 0 0, #000 calc(var(--r) - .5px), transparent var(--r)) calc(100% - var(--f)) 100% / var(--r) var(--r) no-repeat; }
+.nc:not(.drop) .nc-row, .nc:not(.drop) .nc-body { z-index: 2; }
 .nc.drop .nc-skin::after { content: ""; position: absolute; inset: 0; border-radius: inherit;
   background: linear-gradient(to bottom, rgba(255, 255, 255, .08), rgba(255, 255, 255, 0) 45%);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07); }
@@ -89,6 +116,8 @@
   filter: blur(9px); --k: var(--gl); opacity: calc(.3 + var(--k) * .7); transform: scale(calc(.85 + var(--k) * .25)); }
 .nc-glow.l { left: calc(var(--row) * -1.5); }
 .nc-glow.r { right: calc(var(--row) * -1.5); --k: var(--gr); }
+.nc:not(.drop) .nc-glow.l { left: calc(var(--f) - var(--row) * 1.5); }
+.nc:not(.drop) .nc-glow.r { right: calc(var(--f) - var(--row) * 1.5); }
 /* Each state has its colour: listening cyan, thinking indigo, responding blue, waiting for an OK a calm teal,
    trouble amber. The colours ease from one to the next (registered properties, see @property below). */
 .nc[data-mode="listen"] { --glow-a: #7ff3ff; --glow-b: #1fa8ff; }
@@ -97,8 +126,8 @@
 .nc[data-mode="error"] { --glow-a: #ffcf86; --glow-b: #ff6a2f; }
 @property --glow-a { syntax: '<color>'; inherits: true; initial-value: #6fd6ff; }
 @property --glow-b { syntax: '<color>'; inherits: true; initial-value: #2a6bff; }
-.nc-mark { flex: none; color: #fff; font: italic 800 13px/1 -apple-system, "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
-  letter-spacing: .03em; text-shadow: 0 0 10px rgba(0, 30, 90, .55); white-space: nowrap; }
+.nc-mark { flex: none; color: #fff; font: 800 15px/1 "Doto", "Martian Mono", ui-monospace, monospace;
+  letter-spacing: .02em; text-shadow: 0 0 10px rgba(0, 30, 90, .55); white-space: nowrap; }
 .nc:not(.drop) .nc-globe { order: -1; }
 .nc:not(.drop) .nc-status { margin-left: auto; }
 .nc-row { position: absolute; left: 0; right: 0; top: 0; height: var(--row); display: flex; align-items: center; gap: 8px;
@@ -111,7 +140,8 @@
 .nc-status { flex: none; display: flex; align-items: center; gap: 8px; color: var(--ink); text-shadow: 0 0 10px rgba(0, 30, 90, .55); white-space: nowrap; max-width: 300px;
   overflow: hidden; text-overflow: ellipsis; }
 .nc.full .nc-status { max-width: none; }
-.nc-label { display: inline-block; overflow: hidden; text-overflow: ellipsis; will-change: transform, opacity; }
+.nc-label { display: inline-block; overflow: hidden; text-overflow: ellipsis; will-change: transform, opacity;
+  font-size: 11px; line-height: 1.3; letter-spacing: .04em; text-transform: uppercase; }
 /* The waveform and the lens ease in when they appear. */
 @keyframes nc-in { from { opacity: 0; transform: scaleX(.3); } }
 .nc[data-mode="listen"] .nc-wave, .nc[data-mode="talk"] .nc-wave { animation: nc-in .32s cubic-bezier(.2, .8, .2, 1); }
@@ -137,6 +167,9 @@
   transition: opacity .2s ease .18s; }
 /* Words show the frame they arrive: no fade on the way in. */
 .nc.full .nc-body { opacity: 1; transition: opacity 0s; }
+/* Notch style: the reply is inside the shape, so it's cut to the shape while it grows and shrinks. */
+.nc:not(.drop) .nc-body { clip-path: inset(0 0 max(0px, calc(100% - var(--h) + var(--row))) 0); }
+.nc:not(.drop) .nc-text { width: calc(var(--bw, 440px) - 40px); }
 .nc-text { margin: 0; max-height: ${MAX_BODY}px; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink);
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14px); }
 .nc-text.short { -webkit-mask-image: none; }
@@ -234,7 +267,8 @@
     if (R.safe) R.safe.top = Math.max(R.safeTop0, px);
   };
   // The shape it should have now: open for a prompt or a reply (unless folded), else the slim one.
-  const want = () => (st.prompt || (st.text && !st.folded) ? 'full' : 'compact');
+  // The card waits for the pill to split off the notch, and goes back in before the pill does.
+  const want = () => (!st.retractT && st.liq?.dir !== 'out' && (st.prompt || (st.text && !st.folded)) ? 'full' : 'compact');
   const apply = (s) => {
     if (drop()) return applyDrop(s);
     el.style.setProperty('--y', '0px');
@@ -243,14 +277,15 @@
     el.style.setProperty('--row', `${row}px`);
     // Both wings as wide as the status needs (the capsule stays centred on the notch), within reason.
     // Left wing: globe and name; right wing: the status. Both as wide as the wider one, so it stays centred.
-    const status = $('.nc-status'), mark = $('.nc-mark');
-    const need = Math.max(12 + 28 + 8 + mark.scrollWidth + 18, status.scrollWidth + 34);
+    const mark = $('.nc-mark');
+    const need = Math.max(12 + 28 + 8 + mark.scrollWidth + 18, (st.statusW ?? $('.nc-status').scrollWidth) + 34);
     const wing = clamp(Math.ceil(need), WING, 240);
     el.style.setProperty('--wing', `${wing}px`);
     let w = n.w, h = n.real ? n.h : 0, r = n.real ? n.h * 0.36 : 0;
     if (s === 'compact') { w = n.w + wing * 2; h = row; r = row / 2; }
     else if (s === 'full') {
       w = Math.min(Math.max(OPEN_W, n.w + WING * 2), innerWidth - 24);
+      el.style.setProperty('--bw', `${Math.round(w)}px`);
       const body = $('.nc-body');
       h = row + body.scrollHeight; r = 26;
     }
@@ -270,14 +305,14 @@
     el.style.left = `${n.x + n.w / 2}px`;
     el.style.setProperty('--row', `${row}px`);
     el.style.setProperty('--f', '0px');
-    const status = $('.nc-status');
+    const statusW = st.statusW ?? $('.nc-status').scrollWidth;
     let w = n.real ? n.w * 0.62 : 120, h = n.real ? Math.min(n.h, row) : row, r = h / 2, y = n.real ? 0 : -row - 12;
     if (s === 'compact') {
       // The globe dead centre: both sides as wide as the wider of the name and the status.
-      const side = Math.max($('.nc-mark').scrollWidth, status.scrollWidth);
+      const side = Math.max($('.nc-mark').scrollWidth, statusW);
       w = Math.max(190, 2 * (side + 18 + 12) + 30, st.minW || 0); h = row; r = row / 2; y = n.h + GAP;
     } else if (s === 'full') {
-      const side = Math.max($('.nc-mark').scrollWidth, status.scrollWidth);
+      const side = Math.max($('.nc-mark').scrollWidth, statusW);
       w = Math.max(190, 2 * (side + 18 + 12) + 30, st.minW || 0); h = row; r = row / 2; y = n.h + GAP;
       el.style.setProperty('--bw', `${Math.round(Math.min(OPEN_W, innerWidth - 24))}px`);
     }
@@ -299,32 +334,55 @@
   let raf = 0, last = 0;
   const jst = { t: 0, dt: 0.016, mode: null, act: null, actA: 0, open: 1, look: [0, 0], sq: 0, wide: 0, dizzy: 0, happy: 0, sleepy: 0, voice: null, heard: 0 };
 
-  // The status changes with a little motion: the old words lift and blur away, the new ones settle in.
-  let swapping = null;
-  const swapLabel = (words) => {
-    if (!st.open || reduced() || !label.textContent || !words) { label.getAnimations?.().forEach((a) => a.cancel()); label.textContent = words; return; }
-    swapping = words;
-    label.getAnimations?.().forEach((a) => a.cancel());
-    const out = label.animate([{ opacity: 1, filter: 'blur(0)', transform: 'translateY(0)' }, { opacity: 0, filter: 'blur(3px)', transform: 'translateY(-5px)' }], { duration: 120, easing: 'ease-in', fill: 'forwards' });
-    out.onfinish = () => {
-      if (swapping !== words) return;
-      label.textContent = words; refit();
-      out.cancel();
-      label.animate([{ opacity: 0, filter: 'blur(3px)', transform: 'translateY(5px)' }, { opacity: 1, filter: 'blur(0)', transform: 'translateY(0)' }], { duration: 220, easing: 'cubic-bezier(.2, .8, .2, 1)' });
-    };
+  // The status slot (the waveform or the words) changes with a little motion: the old content lifts and blurs away,
+  // the pill starts resizing for the new content at once, and the new content settles in once there's room for it.
+  const statusEl = $('.nc-status');
+  const labelShown = (m) => m !== 'talk' && !(drop() && m === 'listen');
+  const looks = (m, words) => `${m === 'listen' || m === 'talk' ? 'wave' : ''}|${labelShown(m) ? words : ''}`;
+  // The status width a mode and words would take (laid out once, never painted).
+  const statusWidthFor = (m, words) => {
+    const keepM = el.dataset.mode, keepW = label.textContent;
+    el.dataset.mode = m; label.textContent = words;
+    const w = statusEl.scrollWidth;
+    el.dataset.mode = keepM; label.textContent = keepW;
+    return w;
   };
+  let swapTo = null, swapN = 0;
+  const settle = (to) => { el.dataset.mode = to.mode; label.textContent = to.words; };
   const setMode = (m, words) => {
-    const was = swapping ?? label.textContent;
     st.mode = m;
-    el.dataset.mode = m ?? '';
-    if (words != null && words !== was) { swapping = null; swapLabel(words); }
-    // A longer or shorter status: the wings follow it.
-    if (st.open && shape !== 'rest' && label.textContent !== was) refit();
+    const cur = swapTo ?? { mode: el.dataset.mode ?? '', words: label.textContent };
+    const to = { mode: m ?? '', words: words ?? cur.words };
+    if (looks(to.mode, to.words) === looks(cur.mode, cur.words)) {
+      // Looks the same (the glow colour may still change): no motion.
+      if (swapTo) swapTo = to; else settle(to);
+      return;
+    }
+    swapN++; statusEl.getAnimations?.().forEach((a) => a.cancel());
+    if (!st.open || shape === 'rest' || reduced()) { swapTo = null; settle(to); st.statusW = null; if (st.open && shape !== 'rest') refit(); return; }
+    const tok = swapN, was = statusEl.scrollWidth;
+    st.statusW = statusWidthFor(to.mode, to.words);
+    const grows = st.statusW > was + 2;
+    swapTo = to;
+    refit();
+    const settleIn = () => {
+      if (tok !== swapN) return;
+      swapTo = null; settle(to);
+      if (looks(to.mode, to.words) === '|') return;
+      // Growing: the pill gets a head start, so the words never spill past it.
+      statusEl.animate?.([{ opacity: 0, filter: 'blur(3px)', transform: 'translateY(5px)' }, { opacity: 1, filter: 'blur(0)', transform: 'translateY(0)' }],
+        { duration: 240, delay: grows ? 110 : 0, easing: 'cubic-bezier(.2, .8, .2, 1)', fill: 'backwards' });
+    };
+    if (looks(cur.mode, cur.words) === '|') { settleIn(); return; } // nothing showing to fade away
+    const out = statusEl.animate?.([{ opacity: 1, filter: 'blur(0)', transform: 'translateY(0)' }, { opacity: 0, filter: 'blur(3px)', transform: 'translateY(-5px)' }], { duration: 120, easing: 'ease-in', fill: 'forwards' });
+    if (!out) { settleIn(); return; }
+    out.onfinish = () => { if (tok !== swapN) return; out.cancel(); settleIn(); };
   };
   const show = () => {
     mount();
     R.wake?.();
     clearTimeout(st.closeT);
+    if (st.retractT) { clearTimeout(st.retractT); st.retractT = 0; requestAnimationFrame(() => { if (st.open) apply(want()); }); }
     if (st.open && !el.classList.contains('closing')) return;
     st.open = true;
     el.classList.remove('closing');
@@ -337,21 +395,29 @@
       el.style.transition = '';
     }
     pour('out');
-    requestAnimationFrame(() => { if (st.open) apply(want()); });
+    // Measured now it's open: text set while it was closed (a line said on its own, a prompt) wasn't.
+    refit();
     if (!raf) { last = performance.now(); raf = requestAnimationFrame(frame); }
   };
   const close = () => {
-    if (!st.open) return;
+    if (!st.open || st.retractT) return;
+    // A card out: it slides back up into the pill first, then the pill goes into the notch.
+    if (drop() && shape === 'full' && !reduced()) {
+      st.prompt = null; st.lingerAt = 0; hot(false);
+      st.retractT = setTimeout(() => { st.retractT = 0; close(); }, 320);
+      apply('compact');
+      return;
+    }
     st.open = false; st.prompt = null; st.lingerAt = 0;
     pour('in');
-    hot(false); el.classList.remove('hov'); el.style.setProperty('--mx', '0px');
+    hot(false); el.classList.remove('hov');
     el.classList.add('closing');
     apply('rest');
     clearTimeout(st.closeT);
     st.closeT = setTimeout(() => {
       if (st.open) return;
       el.classList.remove('on', 'closing');
-      st.liq = null; goo.style.display = 'none'; el.classList.remove('liquid'); st.folded = false; st.minW = 0;
+      st.liq = null; goo.style.display = 'none'; el.classList.remove('liquid'); st.folded = false; st.minW = 0; st.statusW = null;
       st.text = ''; st.heard = ''; textEl.textContent = ''; choicesEl.hidden = true; choicesEl.textContent = ''; setMode(null, '');
     }, reduced() ? 200 : 760);
   };
@@ -571,26 +637,22 @@
     // Once the neck has snapped (u 0.62) the goo has nothing left to show; its copy of the pill trails the real one by a
     // frame while it springs, so it's hidden at once (else a sliver of it peeks out above the capsule).
     if (q.dir === 'out' && u >= 0.55) el.classList.remove('liquid');
-    if (q.dir === 'out' && u >= 0.64) { st.liq = null; goo.style.display = 'none'; return; }
+    if (q.dir === 'out' && u >= 0.64) { st.liq = null; goo.style.display = 'none'; refit(); return; }
     if (u >= 1) {
-      if (q.dir === 'out') { st.liq = null; el.classList.remove('liquid'); goo.style.display = 'none'; }
+      if (q.dir === 'out') { st.liq = null; el.classList.remove('liquid'); goo.style.display = 'none'; refit(); }
       else place(gPill, { width: '0px' });
     }
   };
 
-  // Drop: the pill leaning toward the cursor, and the lens looking at it.
+  // Drop: the lens looks at the cursor. The pill itself stays put under the notch.
   const dropStep = () => {
     const r = el.getBoundingClientRect();
     liquidStep(performance.now());
-    // Magnet: within reach, it leans a few px toward the cursor, and the globe looks at it.
-    let mx = 0, look = [0, 0];
-    if (st.open && st.px != null) {
+    let look = [0, 0];
+    if (st.open && !st.liq && st.px != null) {
       const cx = r.left + r.width / 2, cy = r.top + r.height / 2, dx = st.px - cx, dy = st.py - cy, dist = Math.hypot(dx, dy);
-      const pull = clamp(1 - dist / 280, 0, 1);
-      mx = clamp(dx * 0.07 * pull, -12, 12);
       if (dist < 520) look = [clamp(dx / 260, -1, 1), clamp(dy / 200, -1, 1)];
     }
-    el.style.setProperty('--mx', `${st.liq ? 0 : mx.toFixed(1)}px`);
     jst.look = look;
   };
 
@@ -626,21 +688,21 @@
     if (!drop()) { close(); return; }
     if (!st.text) return;
     st.folded = !st.folded;
-    if (st.folded) label.textContent = `${st.text.replace(/\s+/g, ' ').slice(0, 28).trim()}…`;
-    else label.textContent = '';
+    if (st.folded) st.preFoldW = st.minW; else st.minW = st.preFoldW ?? 0;
     st.lingerAt &&= performance.now();
-    requestAnimationFrame(() => apply(want()));
+    apply(want());
+    setMode(st.mode, st.folded ? `${st.text.replace(/\s+/g, ' ').slice(0, 28).trim()}…` : '');
   });
   addEventListener('resize', () => { if (st.open) apply(shape); });
 
   // ---------- API ----------
   // A new turn starts clean: anything left from the last one (a reply still lingering, or one folding away) goes.
   const fresh = () => {
-    st.text = ''; st.heard = ''; st.prompt = null; st.folded = false; st.lingerAt = 0; st.speech = null; st.minW = 0;
+    st.text = ''; st.heard = ''; st.prompt = null; st.folded = false; st.lingerAt = 0; st.speech = null; st.minW = 0; st.statusW = null;
     textEl.textContent = ''; choicesEl.hidden = true; choicesEl.textContent = '';
     if (st.open) refit();
   };
-  const closing = () => !st.open || el.classList.contains('closing');
+  const closing = () => !st.open || el.classList.contains('closing') || !!st.retractT;
   const linger = () => {
     // Long enough to read it: about a third of a second a word, between 3 and 14 seconds.
     const words = (st.text.match(/\S+/g) ?? []).length;
