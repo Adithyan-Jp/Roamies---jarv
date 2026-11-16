@@ -96,14 +96,43 @@ export function speakable(text) {
   return /[\p{L}\p{N}]/u.test(s.replace(CUE, '')) ? s : '';
 }
 
+// VoiceStudio's first chunk (early): cut at the first clause break or sentence end that is EARLY_MIN characters in,
+// else at a word once EARLY_WORDS are in with no sentence ended. Returns { end, from } (the chunk is line.slice(0, end)
+// and the text goes on from `from`), or null to take the normal sentence rules.
+const EARLY_MIN = 30, EARLY_WORDS = 60;
+function earlyCut(line, nl, all) {
+  let best = null;
+  const take = (end, from) => { if (end >= EARLY_MIN && (!best || end < best.end)) best = { end, from }; };
+  for (const m of line.matchAll(/[,;:](?=\s)/g)) take(m.index + 1, m.index + 1);
+  for (const m of line.matchAll(/\s[-–—](?=\s)/g)) take(m.index, m.index + m[0].length); // a spaced dash: not said
+  let ended = false;
+  for (const m of line.matchAll(SENTENCE_END)) {
+    const end = m.index + m[0].length;
+    if (end < line.length || nl >= 0 || all) { ended = true; take(end, end); } // at the end of a finished reply, its last sentence is complete
+  }
+  if (best) return best;
+  if (ended || line.length < EARLY_WORDS) return null;
+  const sp = line.lastIndexOf(' ', EARLY_WORDS);
+  return sp > 0 ? { end: sp, from: sp } : null;
+}
+
+/**
+ * opts: early (VoiceStudio: the first chunk is short, see earlyCut) and cap (characters; 0: no cap). Once the spoken
+ * characters reach cap, nothing more is emitted (the caller still shows the whole reply as text).
+ */
 export class SpeechText {
-  constructor(emit) {
+  constructor(emit, { early = false, cap = 0 } = {}) {
     this.emit = emit; // (sentence) => void, each one cleaned and non-empty
     this.buf = '';
     this.atLineStart = true;
     this.fence = false;
     this.skip = false; // inside a screen-only line
     this.tone = null; // a cue for the next sentence, from the body's emote, when it has none of its own
+    this.early = !!early;
+    this.cap = Math.max(0, Number(cap) || 0);
+    this.chunks = 0; // chunks emitted so far
+    this.spoken = 0; // characters emitted so far
+    this.capped = false;
   }
 
   /** The body's emote ([hype] etc.) colours the next sentence. */
@@ -115,14 +144,18 @@ export class SpeechText {
   flush() { this.drain(true); }
 
   out(s) {
+    if (this.capped) return;
     let t = speakable(s);
     if (!t) return;
     if (this.tone) { if (!/^\[/.test(t)) t = `${this.tone} ${t}`; this.tone = null; }
     this.emit(t);
+    this.chunks++; this.spoken += t.length;
+    if (this.cap && this.spoken >= this.cap) this.capped = true;
   }
 
   drain(all) {
     for (;;) {
+      if (this.capped) { this.buf = ''; return; } // past the spoken cap: the rest is text only
       if (!this.buf) return;
       if (this.atLineStart) {
         const nl = this.buf.indexOf('\n');
@@ -144,18 +177,24 @@ export class SpeechText {
       if (nl === 0) { this.buf = this.buf.slice(1); this.atLineStart = true; continue; } // blank line
       // Prose: a full line, or a sentence that has ended.
       const line = nl < 0 ? this.buf : this.buf.slice(0, nl);
-      SENTENCE_END.lastIndex = 0;
-      let cut = -1, m;
-      while ((m = SENTENCE_END.exec(line))) { if (m.index + m[0].length < line.length || nl >= 0) { cut = m.index + m[0].length; break; } }
-      if (cut < 0 && nl >= 0) cut = nl;
-      if (cut < 0 && line.length > LONG) { const sp = line.lastIndexOf(', ', LONG); cut = sp > 40 ? sp + 1 : line.lastIndexOf(' ', LONG); }
-      if (cut <= 0) {
-        if (all) { this.out(this.buf); this.buf = ''; }
-        return;
+      const first = this.early && !this.chunks ? earlyCut(line, nl, all) : null;
+      let cut = -1, from = -1;
+      if (first) { cut = first.end; from = first.from; }
+      else {
+        SENTENCE_END.lastIndex = 0;
+        let m;
+        while ((m = SENTENCE_END.exec(line))) { if (m.index + m[0].length < line.length || nl >= 0) { cut = m.index + m[0].length; break; } }
+        if (cut < 0 && nl >= 0) cut = nl;
+        if (cut < 0 && line.length > LONG) { const sp = line.lastIndexOf(', ', LONG); cut = sp > 40 ? sp + 1 : line.lastIndexOf(' ', LONG); }
+        if (cut <= 0) {
+          if (all) { this.out(this.buf); this.buf = ''; }
+          return;
+        }
+        from = cut;
       }
       this.out(line.slice(0, cut));
-      this.buf = this.buf.slice(cut);
-      if (cut === nl || /^\n/.test(this.buf)) { this.buf = this.buf.replace(/^\n/, ''); this.atLineStart = true; }
+      this.buf = this.buf.slice(from);
+      if (from === nl || /^\n/.test(this.buf)) { this.buf = this.buf.replace(/^\n/, ''); this.atLineStart = true; }
       else this.buf = this.buf.replace(/^[ \t]+/, '');
     }
   }
