@@ -221,6 +221,10 @@
       await job.h.closed;
       current = null;
     }
+    // Every queued tool has finished but the turn is still going: keep a quiet thinking tag up until the next thing.
+    if (responding && !speech && !thought && !listen?.open && !research && !agentish && !Roamie.ink?.playing) {
+      thought = getAgent()?.think('', { stream: true, quiet: true }) ?? null;
+    }
   }
   const settle = (id, isError) => {
     const job = current?.id === id ? current : jobs.find((j) => j.id === id);
@@ -257,6 +261,7 @@
         // Nor is it still working in another app, even if that work's end was missed.
         a.hand?.end();
         responding = true;
+        a.working?.(true);
         heard = null;
         research = false; fromWeb = false; spoken = '';
         agentish = !!e.agentish;
@@ -266,7 +271,7 @@
         } else if (!listen?.open && !waveTurn) thought = a.think('', { stream: true });
         break;
       case 'thinking':
-        if (speech || listen?.open || waveTurn || research || agentish) break;
+        if (speech || listen?.open || research || agentish || (waveTurn && !a.visible)) break;
         if (!thought) thought = a.think('', { stream: true, quiet: true });
         thought.append(e.text);
         break;
@@ -349,6 +354,7 @@
         break;
       case 'done':
         responding = false;
+        a.working?.(false);
         if (agentish) { agentish = false; Roamie.agentHome?.hatchOff(); }
         if (research) panel()?.end(fromWeb ? 'From the web' : 'Answer');
         research = waveTurn = false;
@@ -359,6 +365,7 @@
       case 'error':
         dropAutoListen();
         responding = false;
+        a.working?.(false);
         if (agentish) { agentish = false; Roamie.agentHome?.hatchOff(); }
         if (research) panel()?.fail(e.message);
         research = waveTurn = false;
