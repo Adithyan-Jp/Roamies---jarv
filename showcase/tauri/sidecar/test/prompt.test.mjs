@@ -78,7 +78,9 @@ assert.ok(agentLine, 'the stable prompt has the agents paragraph');
 assert.match(agentLine, /Use one only when \$\{userName\} asks for an agent or for work in the background, or for long hands-off work[^;]*after offering and hearing yes; never for a quick answer or anything on the screen\./);
 assert.match(agentLine, /Write a complete brief: it sees none of this conversation\./);
 assert.match(agentLine, /once one launches you say nothing more that turn/);
-assert.match(side, /const asked = agentish \? `\$\{stamped\}\\n\(They asked for an agent: call send_agent\.\)` : stamped;/, 'an explicit request gets the note');
+assert.match(side, /const toAgent = agentish \? `\$\{stamped\}\\n\(They asked for an agent: call send_agent\.\)` : stamped;/, 'an explicit request gets the note');
+// A job handed to another model (hybrid models) carries a note with their exact words after it.
+assert.match(side, /const asked = handoff \? `\$\{toAgent\}\\n\$\{handoffNote\(/, 'a handed-off turn carries the handoff note');
 assert.match(side, /what you remember, your agents\) is only sent again when it changes/);
 assert.match(side, /\$\{working \? `\\n\$\{working\}` : ''\}`;/, 'the Agents part goes in the memory section');
 assert.ok(!/clicky|Your jobs/i.test(side), 'no borrowed names');

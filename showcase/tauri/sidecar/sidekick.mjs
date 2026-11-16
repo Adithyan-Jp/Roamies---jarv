@@ -12,7 +12,7 @@ import { agentEvents, stallWatch } from './agentstream.mjs';
 import { CATALOG_PROVIDERS, createCatalogs } from './catalogs.mjs';
 import {
   AUTH_PROVIDERS, AuthStorage, OPENAI_CHATGPT_KEY, apiKeyStorageKeys, claudeCodeEnv, dualAuthProvider, getAuthStorageKeys, getContextWindow, getDefaultModel, getModel,
-  getModelsForProvider, loginChatGPT, ollamaServedContext, parseLocalModelId, pointScale, registerRuntimeModels, resolveClaudeCodeBinary, revokeChatGPTSignIn, signInWithClaudeCode,
+  getModelsForProvider, getSupportedThinkingLevels, loginChatGPT, ollamaServedContext, parseLocalModelId, pointScale, registerRuntimeModels, resolveClaudeCodeBinary, revokeChatGPTSignIn, signInWithClaudeCode,
   signOutOfClaudeCode, storageKeyProvider,
 } from '@kenkaiiii/gg-core';
 import { execFile, execFileSync, fork } from 'node:child_process';
@@ -42,6 +42,10 @@ import { QUESTIONS, openNote, answerTurn, wantsSkip, endsChat, splitTurn, plain,
 import { SpeechText, CueFilter, VOICE_CUES, LISTEN_SECS, listenWait, listensAfter } from './speech.mjs';
 import { createSpeaker, voiceProblemText, voiceWhy } from './speaker.mjs';
 import { LITE_BUDGET, LITE_TOOLS, LITE_TURNS, liteSystem } from './lite.mjs';
+import { handoffNote } from './quote.mjs';
+import { JOB_KINDS, findModelByName, findModelMention, hybridOn, isChitchat, jobKinds, kindOfTool, parseSpec, pickHeavy } from './route.mjs';
+import { becauseOf, createLimits, firstFree, isQuota, limitFrom, untilWords } from './limits.mjs';
+import { SLOTS, isSetting, resolveEffort } from './effort.mjs';
 import { pickNotch } from './notch.mjs';
 import { DEFAULT_VOICE, FISH_CHOICES } from './fish.mjs';
 import { GEMINI_CHOICES, GEMINI_DEFAULT_VOICE, GEMINI_LOOK_VOICES, GEMINI_MODEL, GEMINI_VOICES } from './gemini.mjs';
@@ -105,6 +109,11 @@ const DEFAULT_KEYS = process.platform === 'win32'
   : { talk: ['control', 'option'], summon: 'Control+Alt+KeyS', snap: 'Control+Alt+KeyA', list: 'Control+Alt+KeyL' };
 const DEFAULTS = {
   provider: null, model: null, sound: true, allowActions: false, skipAllow: false, voice: true,
+  heavy: { code: '', computer: '', web: '', draw: '', agents: '' }, // hybrid models: a model for each kind of heavy job ('provider:model'), '' = the default model (route.mjs)
+  hybrid: false, // the master switch for hybrid models (a model per kind of job, or named in a request)
+  backups: false, // the master switch for backup models when one is at its limit or unavailable
+  fallbacks: ['', ''], // backup models, in order, for when the default hits its usage limit (limits.mjs)
+  efforts: {}, // how hard each model slot thinks: default, each heavy job, backup1, backup2 ('' = automatic, 'off', or a level)
   notch: 'off', // where I appear on a Mac with a notch: 'off' (beside the cursor, default), 'drop' (the capsule) or 'spread' (see notchMode)
   onboarded: false, onboardStep: 0, filesAsked: false, keys: DEFAULT_KEYS, muteWhileTalking: true, autoListen: false, listenEvery: false, listenSecs: 8, lite: false, wakeWord: false, setupVersion: 0, size: 'default', look: 'classic', introDone: false,
   replies: 'text', // 'voice': spoken (with Fish Audio or Gemini) as well as shown
@@ -165,8 +174,11 @@ let shellInfo = null; // resolves the shell's reply to it: screens, tray, panel,
     delete config[one];
   }
 }
-const saveConfig = () => writeJson(CONFIG_PATH, config, { backup: true });
-let turnWords = ''; // what they said this turn, verbatim: attached to every handoff to a background agent
+// Hybrid models (route.mjs): while a heavy job runs on its own model, config.provider and config.model hold that model
+// and `defaultPick` holds the user's default. Only the default is ever saved.
+let routed = null, defaultPick = null;
+let turnWords = ''; // what they said this turn, verbatim: attached to every handoff (route, agents)
+const saveConfig = () => writeJson(CONFIG_PATH, routed && defaultPick ? { ...config, provider: defaultPick.provider, model: defaultPick.model } : config, { backup: true });
 
 // ---------- spoken replies (Fish Audio, Gemini or VoiceStudio) ----------
 // The key is the user's own: in the Keychain (macOS), DPAPI-encrypted (Windows) or the desktop's keyring (Linux),
@@ -462,6 +474,112 @@ function ensureModel() {
   saveConfig();
   return true;
 }
+
+// ---------- models: heavy jobs, a model they name, backups and limits ----------
+// Which model answers a request is decided in this order (routeForTurn):
+//  1. a model they named in their own words ("use Opus for this"): any kind of work;
+//  2. the model set for this kind of job (Settings → Model → Hybrid models), classified by words (route.mjs);
+//  3. a follow-up shortly after a heavy job stays on the same model;
+//  then the first of that choice, the default and the (up to two) backups whose platform isn't at its limit
+//  (limits.mjs). The conversation carries over; the model taking over gets a note with their exact words (quote.mjs).
+const STICKY_MS = 3 * 60_000;
+let stickyUntil = 0, stickyPick = null, restoreTimer = null;
+const limits = createLimits();
+let turnNamed = null; // the model they named this turn: a background agent started this turn follows it
+let retryInfo = null; // a request being retried on the next model after a limit: { sent, from, untilText, count }
+let retryNext = null;
+const hybridActive = () => !!config.hybrid && hybridOn(config.heavy);
+const runnableSpec = (p, id) => canRun(p, id) || (p === 'local' && !!signedIn.get('local') && !!parseLocalModelId(id ?? ''));
+const modelName = (id) => getModel(id)?.name ?? id;
+const pickOf = (provider, model, slot) => ({ provider, model, spec: `${provider}:${model}`, slot });
+const defaultSpecPick = () => { const d = defaultPick ?? { provider: config.provider, model: config.model }; return pickOf(d.provider, d.model, 'default'); };
+/** The default, then the backups they set, in order: the models a request falls back through. */
+function chainOrder() {
+  const out = [defaultSpecPick()];
+  if (config.backups) (config.fallbacks ?? []).slice(0, 2).forEach((s, i) => { const h = parseSpec(s); if (h && runnableSpec(h.provider, h.model)) out.push(pickOf(h.provider, h.model, `backup${i + 1}`)); });
+  return out;
+}
+const slotOf = (spec) => chainOrder().find((c) => c.spec === spec)?.slot ?? JOB_KINDS.find((j) => parseSpec(config.heavy?.[j.kind])?.spec === spec)?.kind ?? null;
+/** The models that can run right now, for naming one in a request. */
+function candidates() {
+  const out = [], seen = new Set();
+  for (const p of ['anthropic', 'openai', 'gemini', ...MENU_PROVIDERS]) {
+    if (seen.has(p)) continue; seen.add(p);
+    for (const m of runnable(p)) out.push({ provider: p, id: m.id, name: m.name });
+  }
+  return out;
+}
+const defaultsByProvider = () => Object.fromEntries([...new Set(['anthropic', 'openai', 'gemini', ...MENU_PROVIDERS])].map((p) => { try { return [p, getDefaultModel(p)?.id]; } catch { return [p, null]; } }));
+
+function routeTo(pick) {
+  if (routed?.spec === pick.spec) { routed = pick; return false; }
+  if (!routed) defaultPick = { provider: config.provider, model: config.model };
+  config.provider = pick.provider; config.model = pick.model; routed = pick; agent = null;
+  logLine('route', { slot: pick.slot, model: pick.spec });
+  menu();
+  return true;
+}
+function routeBack() {
+  if (!routed) return;
+  config.provider = defaultPick.provider; config.model = defaultPick.model; routed = null; defaultPick = null; agent = null;
+  logLine('route', { slot: 'default' });
+  menu();
+}
+function armRestore() {
+  clearTimeout(restoreTimer);
+  restoreTimer = setTimeout(() => { if (busy) armRestore(); else routeBack(); }, STICKY_MS + 5000);
+  restoreTimer.unref?.();
+}
+/**
+ * Before a turn: pick the model it runs on and say what handoff note (if any) it needs: { reason, from, kind, untilText }
+ * or null. `text` is what they said; system lines ("(Reminder…)") and chit-chat never switch anything.
+ */
+function routeForTurn(text) {
+  const t = String(text ?? ''), system = !t || t.startsWith('(');
+  const dflt = defaultSpecPick(), prev = routed?.spec ?? dflt.spec, prevSlot = routed?.slot ?? 'default';
+  turnNamed = null;
+  let want = null, why = null, kindLabel = '';
+  if (!system && config.hybrid) {
+    const named = findModelMention(t, candidates(), defaultsByProvider());
+    if (named && named.spec !== dflt.spec) { want = pickOf(named.provider, named.model, null); why = 'named'; turnNamed = want; }
+  }
+  if (!want && !system && hybridActive()) {
+    const p = pickHeavy(jobKinds(t), config.heavy, runnableSpec);
+    if (p) { want = pickOf(p.provider, p.model, p.kind); why = 'job'; kindLabel = JOB_KINDS.find((j) => j.kind === p.kind)?.label ?? p.kind; }
+    else if (stickyPick && Date.now() < stickyUntil && !isChitchat(t) && runnableSpec(stickyPick.provider, stickyPick.model)) {
+      want = pickOf(stickyPick.provider, stickyPick.model, stickyPick.slot); why = stickyPick.why ?? 'job';
+      kindLabel = JOB_KINDS.find((j) => j.kind === want.slot)?.label ?? 'heavy';
+    }
+  }
+  if (want) want.slot = want.slot ?? slotOf(want.spec);
+  const { pick, skipped } = firstFree([want, ...chainOrder()], limits);
+  if (!pick) { routeBack(); return null; } // everything is at its limit: the default will say so when it fails
+  const wanted = !!want && pick.spec === want.spec;
+  if (wanted && pick.spec !== dflt.spec) { stickyPick = { ...pick, why }; stickyUntil = Date.now() + STICKY_MS; routeTo(pick); armRestore(); }
+  else if (pick.slot === 'default' || pick.spec === dflt.spec) routeBack();
+  else routeTo(pick);
+  // What the model taking over is told.
+  const was = getModel(prev.split(':').slice(1).join(':'))?.name ?? prev;
+  // Why the model they hoped for isn't answering: its limit, or it can't be used (sign-in, key, reach, not on the account).
+  const because = (kind, from, untilText) => (isQuota(kind) ? { reason: 'limit', from, untilText } : { reason: 'unavailable', from, untilText, because: becauseOf(kind) });
+  if (retryInfo) return because(retryInfo.kind, retryInfo.from, retryInfo.untilText);
+  if (skipped.length && pick.spec !== prev) {
+    const sk = skipped[0], info = limits.infoFor(sk);
+    return because(info?.kind ?? 'limit', modelName(sk.model), untilWords(info?.until));
+  }
+  if (wanted && pick.spec !== prev && pick.spec !== dflt.spec) return { reason: why, from: was, kind: kindLabel };
+  if (!routed && prevSlot.startsWith('backup') && pick.spec !== prev) return { reason: 'back', from: modelName(dflt.model) };
+  return null;
+}
+/** A tool of a heavy kind started: the next request shortly after stays on that kind's model. */
+function noteTool(name) {
+  const kind = kindOfTool(name);
+  if (!kind || !hybridActive()) return;
+  const p = pickHeavy([kind], config.heavy, runnableSpec);
+  if (!p) return;
+  stickyPick = { ...pickOf(p.provider, p.model, p.kind), why: 'job' }; stickyUntil = Date.now() + STICKY_MS;
+  if (routed) armRestore();
+}
 // Which of the provider's stored credentials this model uses (gemini-api, kimi-code, the ChatGPT plan before an OpenAI key…).
 const credsFor = (provider = config.provider, model = config.model) => auth.resolveCredentials(provider, { storageKeys: getAuthStorageKeys(provider, model) });
 
@@ -730,27 +848,46 @@ const requestBudget = () => Math.min(config.lite ? LITE_BUDGET : BUDGET_CAP, get
 // Claude Code's session for this conversation, so a rebuilt agent continues it instead of starting over.
 let ccResume = null;
 // The Claude Code process when Anthropic is signed in with Claude (else null: the API, with a key or another provider).
-async function claudeCodeRoute() {
-  if (config.provider !== 'anthropic' || !(await auth.hasClaudeCodeLogin().catch(() => false))) return null;
+async function claudeCodeRoute(provider = config.provider) {
+  if (provider !== 'anthropic' || !(await auth.hasClaudeCodeLogin().catch(() => false))) return null;
   const executable = resolveClaudeCodeBinary();
   if (!executable) throw new Error(`Claude Code isn't installed anymore. Sign in with Claude again on the Model page in ${PANEL}.`);
   return { executable, env: claudeCodeEnv() };
 }
 // What a new agent runs on: the provider, model and route picked right now, with the chat's thinking level.
-async function agentModel() {
+async function agentModel(override) {
   await refreshAuth();
   if (!ensureModel()) throw new Error(`No AI model is signed in. Tell ${userName} to sign in on the Model page in ${PANEL}.`);
-  const cc = await claudeCodeRoute();
-  const m = getModel(config.model), c = cc ? {} : await credsFor().catch(() => ({}));
+  // The model for an agent: one they named for it, the one they named this turn, the one set for background agents,
+  // else the default; the first of those whose platform isn't at its limit (then the backups).
+  const named = override && config.hybrid ? findModelByName(override, candidates(), defaultsByProvider()) : null;
+  if (override && config.hybrid && !named) throw new Error(`I can't use "${override}": it isn't signed in here, or I don't know it. Ask ${userName} which model to use.`);
+  const h = hybridActive() ? pickHeavy(['agents'], config.heavy, runnableSpec) : null;
+  const want = named ? pickOf(named.provider, named.model, null) : turnNamed ?? (h ? pickOf(h.provider, h.model, 'agents') : null);
+  const { pick } = firstFree([want, ...chainOrder()], limits);
+  const use = pick ?? defaultSpecPick(), slot = want && use.spec === want.spec ? (want.slot ?? slotOf(want.spec)) : use.slot;
+  const provider = use.provider, model = use.model;
+  const cc = await claudeCodeRoute(provider);
+  const m = getModel(model), c = cc ? {} : await credsFor(provider, model).catch(() => ({}));
   return {
-    provider: config.provider, model: config.model, route: cc ? 'claude-code' : 'api', cc: cc ?? undefined,
-    thinking: m?.supportsThinking ? (CHAT_THINKING ?? undefined) : undefined,
-    baseUrl: c.baseUrl, modelInfo: config.provider === 'local' ? m : undefined, budget: Math.round(getContextWindow(config.model, { provider: config.provider }) * 0.6),
+    provider, model, route: cc ? 'claude-code' : 'api', cc: cc ?? undefined,
+    thinking: thinkingFor(slot, provider, model),
+    baseUrl: c.baseUrl, modelInfo: provider === 'local' ? m : undefined, budget: Math.round(getContextWindow(model, { provider }) * 0.6),
   };
 }
 let agentRoute = null;
 // The chat's thinking level (null: off); side calls never think harder than this.
 const CHAT_THINKING = process.env.ROAMIES_THINKING === 'off' ? null : process.env.ROAMIES_THINKING || 'low';
+// How hard a model thinks: the effort set for its slot (the default, a heavy job, a backup), within what it supports.
+const levelsOf = (provider, model) => { try { return [...getSupportedThinkingLevels(provider, model)]; } catch { return []; } };
+function thinkingFor(slot, provider, model) {
+  const m = getModel(model);
+  if (!m?.supportsThinking) return undefined;
+  const setting = config.efforts?.[slot] ?? '', supported = levelsOf(provider, model);
+  // No list of levels (a local model): as before, the app's default unless they turned it off.
+  if (!supported.length) return setting === 'off' ? undefined : (setting || CHAT_THINKING) ?? undefined;
+  return resolveEffort(setting, supported, CHAT_THINKING) ?? undefined;
+}
 function makeAgent(cc) {
   const m = getModel(config.model);
   controller = new AbortController();
@@ -770,7 +907,7 @@ function makeAgent(cc) {
       touchFacts(lastFactIds);
       return out;
     },
-    thinking: m?.supportsThinking ? (CHAT_THINKING ?? undefined) : undefined,
+    thinking: thinkingFor(routed?.slot ?? 'default', config.provider, config.model),
     signal: controller.signal,
   };
   if (cc) {
@@ -1108,8 +1245,13 @@ const stir = desk.stir;
 // news: the agent ids this system turn passes on.
 const snoozeListenOn = () => VOICE_OK && !!config.voice && !!config.snoozeListen && voiceReady() && !intro;
 async function prompt(text, image = null, note = '', byVoice = false, news = null, listenAfter = false) {
-  // What they said, word for word, for a background agent started this turn. System lines (reminders, agent news) aren't theirs.
+  // What they said, word for word, for the handoffs below (a heavy model, a background agent). System lines aren't theirs.
   turnWords = news || intro || String(text).startsWith('(') ? '' : String(text);
+  // Retrying after a usage limit: the unanswered message is dropped from the conversation, and the next model is told.
+  const retrying = retryInfo?.text === text ? retryInfo : null, retryCount = retrying?.count ?? 0;
+  if (retrying) { retryInfo = retrying; if (session?.messages?.at(-1)?.role === 'user') session.messages.pop(); agent = null; }
+  const handoff = routeForTurn(turnWords || '(system)');
+  if (retrying) retryInfo = null;
   const notReady = await readyAgent();
   // Told once its turn starts, however it goes: the corner and the live state still have the result, so no retries.
   desk.started(news);
@@ -1172,7 +1314,8 @@ async function prompt(text, image = null, note = '', byVoice = false, news = nul
     // They spoke first: untold news rides along with their message, so it's never announced separately afterwards.
     const along = desk.along(text, { intro: !!intro, news: !!news, agentish });
     const stamped = `[${stampNow()}] ${text}${quiz ? `\n(${quiz})` : ''}${along}`;
-    const asked = agentish ? `${stamped}\n(They asked for an agent: call send_agent.)` : stamped;
+    const toAgent = agentish ? `${stamped}\n(They asked for an agent: call send_agent.)` : stamped;
+    const asked = handoff ? `${toAgent}\n${handoffNote({ userName, assistant: lookName(), reason: handoff.reason, from: handoff.from, kind: handoff.kind, words: turnWords, untilText: handoff.untilText, because: handoff.because })}` : toAgent;
     const sent = brief ? `${asked}\n(${brief.note})` : asked;
     // An area snap rides along as an image in the same message.
     const content = image ? [{ type: 'text', text: `${sent}\n(Attached: the area of the screen I ${note ? 'marked' : 'selected'}.${note ? ` ${note}` : ''})` }, image] : sent;
@@ -1231,6 +1374,7 @@ async function prompt(text, image = null, note = '', byVoice = false, news = nul
         releaseBeat(true);
         if (SLOW_TOOLS.has(e.name)) voice?.beat(); // nothing said yet: "One sec." so it's never silent
         use.tools++;
+        noteTool(e.name);
         logLine('tool', { turn, id: e.toolCallId, name: e.name, args: redactArgs(e.name, e.args ?? {}) });
         toolNames.set(e.toolCallId, e.name);
         if (process.env.ROAMIES_USAGE) { toolT.set(e.toolCallId, Date.now()); console.error(`[tool] ${e.name} ${JSON.stringify(e.args ?? {}).slice(0, 160)}`); }
@@ -1270,7 +1414,19 @@ async function prompt(text, image = null, note = '', byVoice = false, news = nul
     lastFailed = true;
     hatchOff();
     if (controller.signal.aborted) voice?.abort(); else { spoken?.flush(); voice?.end(); }
-    if (controller.signal.aborted && quiet) ui({ kind: 'agent', e: { type: 'done' } });
+    // A usage limit: note when it resets, and carry the request on with the next model that's free. The next model
+    // opens its reply by saying so (the handoff note), so they're told in its own voice.
+    const lim = controller.signal.aborted || stalled || config.provider === 'local' || !(config.hybrid || config.backups) ? null : limitFrom(err);
+    if (lim) {
+      // A model that's gone from the account is skipped on its own; anything else takes its whole platform out for a while.
+      limits.mark(lim.kind === 'missing' ? `${config.provider}:${config.model}` : config.provider, lim.until, lim.kind);
+      logLine('limit', { provider: config.provider, model: config.model, kind: lim.kind, until: lim.until });
+      if (retryCount < 2 && firstFree(chainOrder(), limits).pick) {
+        retryNext = { text, image, note, byVoice, listenAfter, news, info: { text, from: modelName(config.model), untilText: untilWords(lim.until), kind: lim.kind, count: retryCount + 1 } };
+      }
+    }
+    if (retryNext) ui({ kind: 'agent', e: { type: 'done' } });
+    else if (controller.signal.aborted && quiet) ui({ kind: 'agent', e: { type: 'done' } });
     else {
       const msg = stalled ? stallMessage() : controller.signal.aborted ? 'Okay, stopping.' : aloud(problem('reply', err, { who: PROVIDER_LABELS[config.provider] }));
       console.error('prompt failed', err);
@@ -1288,6 +1444,10 @@ async function prompt(text, image = null, note = '', byVoice = false, news = nul
     // No usage reported: estimate what the last call sent.
     if (!lastInput && session) lastInput = { session: session.id, tokens: approxTokens(session.messages) + Math.round(system().length / 3.6), measured: false };
     menu();
+  }
+  if (retryNext) {
+    const r = retryNext; retryNext = null; retryInfo = r.info;
+    enqueue(r.text, { image: r.image, note: r.note, byVoice: r.byVoice, listenAfter: r.listenAfter, news: r.news });
   }
 }
 const STALL_MS = 120_000;
@@ -1895,7 +2055,7 @@ function panelState() {
         signedIn: !!oauthOn.get(p), keySaved: !!meta && apiKeyStorageKeys(p).some((k) => storedKeys.has(k)),
         // Kimi and Xiaomi: which kind of key is being added (plan or pay-per-token).
         kinds: meta && keyKinds(meta).length > 1 ? keyKinds(meta).map(([id, label, billing]) => ({ id, label, billing })) : null,
-        models: on ? runnable(p).map((mm) => ({ id: mm.id, name: mm.name })) : [],
+        models: on ? runnable(p).map((mm) => ({ id: mm.id, name: mm.name, levels: mm.supportsThinking ? levelsOf(p, mm.id) : [] })) : [],
       };
     }),
     // The Model page's local rows: each server, connected or not, and why its models aren't in the menu.
@@ -1922,7 +2082,7 @@ function panelState() {
       mics: mics.list, mic: config.mic ?? '', micAuto: mics.list.find((x) => x.id === mics.auto)?.name ?? '',
       download: NEEDS_MODEL && config.voice && !voiceReady() ? { status: voiceModel.status, pct: voiceModel.total ? Math.floor((voiceModel.done / voiceModel.total) * 100) : 0, size: sizeLabel() } : null,
     } : null,
-    sound: !!config.sound, actions: !!config.allowActions, skipAllow: !!config.skipAllow, lite: !!config.lite, notch: MAC && notchScreen ? notchMode() : null, brief: { on: !!config.morningBrief, todoist: !!config.briefTodoist, canTodoist: HANDS_OK }, focus: HANDS_OK ? { until: focusBlock?.until ?? null, task: focusBlock?.task ?? '', list: distractionList(), custom: !!config.distractions } : null, sync: { dir: config.syncDir || '', at: syncInfo.at, error: syncInfo.error, paused: !!syncInfo.paused }, gameMode: HANDS_OK ? config.gameSidebar !== false : null,
+    sound: !!config.sound, actions: !!config.allowActions, skipAllow: !!config.skipAllow, lite: !!config.lite, hybrid: { on: !!config.hybrid, jobs: JOB_KINDS.map((j) => ({ ...j, value: parseSpec(config.heavy?.[j.kind])?.spec ?? '' })), active: routed?.spec ?? '' }, efforts: Object.fromEntries(SLOTS.map((k) => [k, config.efforts?.[k] ?? ''])), fallbacks: { on: !!config.backups, slots: [0, 1].map((i) => parseSpec(config.fallbacks?.[i])?.spec ?? ''), limited: limits.list().filter((l) => !l.key.includes(':') && (isQuota(l.kind) || l.kind === 'busy')).map((l) => ({ label: PROVIDER_LABELS[l.key] ?? l.key, until: l.until })), unavailable: limits.list().filter((l) => !(isQuota(l.kind) || l.kind === 'busy')).map((l) => ({ label: PROVIDER_LABELS[l.key] ?? modelName(l.key.split(':').slice(1).join(':')) ?? l.key, why: becauseOf(l.kind), until: l.until })), using: routed && /^backup/.test(routed.slot ?? '') ? routed.spec : '' }, notch: MAC && notchScreen ? notchMode() : null, brief: { on: !!config.morningBrief, todoist: !!config.briefTodoist, canTodoist: HANDS_OK }, focus: HANDS_OK ? { until: focusBlock?.until ?? null, task: focusBlock?.task ?? '', list: distractionList(), custom: !!config.distractions } : null, sync: { dir: config.syncDir || '', at: syncInfo.at, error: syncInfo.error, paused: !!syncInfo.paused }, gameMode: HANDS_OK ? config.gameSidebar !== false : null,
     login: login.supported ? { on: login.on } : null,
     update: { available: update.available, installing: update.installing, checking: update.checking, result: update.result, page: update.page, done: update.done },
     intro: !!intro,
@@ -2086,7 +2246,35 @@ async function onMenu(id, via) {
       scheduleReminders();
     });
   }
+  // The two master switches.
+  else if (id === 'hybrid') { config.hybrid = !config.hybrid; routeBack(); saveConfig(); menu(); }
+  else if (id === 'backups') { config.backups = !config.backups; routeBack(); saveConfig(); menu(); }
+  // Effort per model slot: how hard it thinks. '' automatic, 'off', or a level its model supports.
+  else if (/^effort_\w+:/.test(id)) {
+    const [, slot, level] = id.match(/^effort_(\w+):(.*)$/s);
+    if (!SLOTS.includes(slot) || !isSetting(level)) return;
+    config.efforts = { ...config.efforts, [slot]: level }; agent = null; saveConfig(); menu();
+  }
+  // Backup models, in order, for when a platform is at its limit.
+  else if (/^fallback_[12]:/.test(id)) {
+    const n = Number(id[9]), spec = id.slice(11), h = parseSpec(spec);
+    if (spec && !(h && runnableSpec(h.provider, h.model))) return;
+    const f = [config.fallbacks?.[0] ?? '', config.fallbacks?.[1] ?? '']; f[n - 1] = spec; config.fallbacks = f; saveConfig(); menu();
+  }
+  // Hybrid models: one model per kind of heavy job ('' = the default), or all of them at once.
+  else if (/^heavy_(computer|code|agents|draw|web):/.test(id)) {
+    const [, kind, spec] = id.match(/^heavy_(\w+):(.*)$/s), h = parseSpec(spec);
+    if (spec && !(h && runnableSpec(h.provider, h.model))) return;
+    config.heavy = { ...config.heavy, [kind]: spec }; routeBack(); saveConfig(); menu();
+  }
+  else if (id.startsWith('heavyall:')) {
+    const spec = id.slice(9), h = parseSpec(spec);
+    if (!h || !runnableSpec(h.provider, h.model)) return;
+    config.heavy = Object.fromEntries(JOB_KINDS.map((j) => [j.kind, spec])); routeBack(); saveConfig(); menu();
+    say(`Heavy jobs will use ${getModel(h.model)?.name ?? h.model}.`, 'happy');
+  }
   else if (id.startsWith('model:')) {
+    routeBack(); // the default is being changed: any heavy job's model steps aside
     const [, p, ...rest] = id.split(':');
     if (!canRun(p, rest.join(':'))) return;
     config.provider = p; config.model = rest.join(':'); agent = null; saveConfig(); menu();

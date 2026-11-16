@@ -290,13 +290,13 @@ export function createAgents({ fork, ui, config, root, userName = 'The user', ru
   const newId = () => { for (;;) { const id = `a${Math.random().toString(36).slice(2, 5)}`; if (!agents.has(id)) return id; } };
   const actionsOff = 'File edits and commands are switched off, and agents need them. Tell the user to turn on "Allow File Edits & Commands" if they want one.';
 
-  async function start({ type, title, brief, inputs = [], deliver_to: deliverTo, continue: cont, returns } = {}) {
+  async function start({ type, title, brief, inputs = [], deliver_to: deliverTo, continue: cont, returns, model: modelName } = {}) {
     await loaded;
     if (!config.allowActions()) throw new Error(actionsOff);
     if (!AGENT_TYPES.includes(type)) throw new Error(`type must be one of ${AGENT_TYPES.join(', ')}.`);
     if (returns != null && !RETURNS.includes(returns)) throw new Error(`returns must be one of ${RETURNS.join(', ')}.`);
     if (!String(brief ?? '').trim()) throw new Error('The brief is empty: say everything the agent needs, it sees none of this conversation.');
-    const md = await config.model();
+    const md = await config.model(modelName ? String(modelName) : undefined); // a model they named for it, else the usual
     const words = String(config.userWords?.() ?? '').trim(); // what they said this turn, verbatim (sidekick.mjs)
     const cap = md.provider === 'local' ? LIMITS.local : LIMITS.running, busy = running().length;
     if (busy >= cap) throw new Error(`${busy} agent${busy === 1 ? ' is' : 's are'} already working, and ${cap} at once is the most${md.provider === 'local' ? ' on a local model' : ''}. Tell ${userName}: they can stop one (or wait for one to finish) and ask again.`);
@@ -519,11 +519,12 @@ export function createAgents({ fork, ui, config, root, userName = 'The user', ru
   const tools = [
     {
       name: 'send_agent',
-      description: `Start a background agent: it works on its own in its own folder (~/Roamies/Agents) while you keep talking, and shows as a row in the top-right corner of the screen. Use it when ${userName} asks for an agent or for work in the background, or for long hands-off work (a website, a document or slides, deep research, tidying a folder) after offering it and hearing yes. Never for a quick answer or anything on the screen. type: maker (makes files: pages, documents, code, pictures), researcher (finds things out on the web and writes notes), organizer (moves and renames files, with one yes for the batch). title: 2 to 5 words for its row. brief: everything it needs, complete and specific, because it sees none of this conversation: what to make or find, for whom, the style, every name and detail ${userName} gave (quote their own words where they matter, never reword a name or a number), and what done looks like. Their exact words are attached to the brief for you, so the agent always has them. inputs: paths of files it should have, or "snap" for the picture sent with this request. deliver_to: a folder they named for the result ("on my Desktop" → ~/Desktop). continue: the id of a finished agent, to carry on in its folder. returns: files when they asked for something made (a page, a document, slides, a picture, "save it as…"); answer when they want something found out or done (a question, a check, tidying, a lookup), and then it reports back to you, with no file. Left out: files for a maker, answer otherwise. Once it starts, say nothing more: its launch on screen is your reply.`,
+      description: `Start a background agent: it works on its own in its own folder (~/Roamies/Agents) while you keep talking, and shows as a row in the top-right corner of the screen. Use it when ${userName} asks for an agent or for work in the background, or for long hands-off work (a website, a document or slides, deep research, tidying a folder) after offering it and hearing yes. Never for a quick answer or anything on the screen. type: maker (makes files: pages, documents, code, pictures), researcher (finds things out on the web and writes notes), organizer (moves and renames files, with one yes for the batch). title: 2 to 5 words for its row. brief: everything it needs, complete and specific, because it sees none of this conversation: what to make or find, for whom, the style, every name and detail ${userName} gave (quote their own words where they matter, never reword a name or a number), and what done looks like. Their exact words are attached to the brief for you, so the agent always has them. model: only when they named a model for this agent ("use Gemini for it", "have Opus do it"): its name as they said it; otherwise leave it out. inputs: paths of files it should have, or "snap" for the picture sent with this request. deliver_to: a folder they named for the result ("on my Desktop" → ~/Desktop). continue: the id of a finished agent, to carry on in its folder. returns: files when they asked for something made (a page, a document, slides, a picture, "save it as…"); answer when they want something found out or done (a question, a check, tidying, a lookup), and then it reports back to you, with no file. Left out: files for a maker, answer otherwise. Once it starts, say nothing more: its launch on screen is your reply.`,
       parameters: z.object({
         type: z.enum(AGENT_TYPES), title: z.string().min(1).max(60), brief: z.string().min(1).max(8000),
         inputs: z.array(z.string().max(500)).max(10).optional(), deliver_to: z.string().max(500).optional(), continue: z.string().max(12).optional(),
         returns: z.enum(RETURNS).optional(),
+        model: z.string().max(80).optional(),
       }),
       execute: async (args) => {
         const a = await start(args);
