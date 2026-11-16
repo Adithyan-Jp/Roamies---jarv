@@ -560,6 +560,8 @@ final class Voice {
     enum Phase { case idle, wake, armed, holding, handsFree, finishing }
 
     private var phase = Phase.idle
+    // How long a hands-free take waits for words before giving up (auto-listen's setting; 8 s otherwise).
+    private var nothingWait = 8.0
     private var chordAt = 0.0, listenAt = 0.0, heardAt = 0.0, voiceAt = 0.0, levelAt = 0.0, releasedAt: Double?
     // When talking ended and what finished the words (the recogniser, its 2.5 s cap): sent with them, for timing.
     private var finishedAt = 0.0, endedVia = ""
@@ -715,7 +717,7 @@ final class Voice {
             let quiet = now - max(heardAt, voiceAt)
             // Steady sound in the room (a fan, music) keeps the level up, so words that stopped coming end it too.
             if !best.isEmpty && (quiet > Self.pauseEnds || now - heardAt > Self.wordsEnd) { end(quiet > Self.pauseEnds ? "pause" : "no new words"); finish() }
-            else if best.isEmpty && now - listenAt > 8 { end("nothing heard"); cancel() }
+            else if best.isEmpty && now - listenAt > nothingWait { end("nothing heard"); cancel() }
             else if now - listenAt > Self.maxSession { end("max length"); finish() }
         case .finishing:
             break
@@ -728,6 +730,7 @@ final class Voice {
 
     private func arm(_ now: Double) {
         phase = .armed
+        nothingWait = 8
         chordAt = now
         heldAtArm = keysDown()
         if !heldAtArm.isEmpty { log("chord: keys already down don't count toward a shortcut: \(heldAtArm.sorted())") }
@@ -835,10 +838,11 @@ final class Voice {
 
     /// The shell saw ⌃⌥S: that ⌃⌥ was a shortcut, not a request to talk.
     /// Start listening hands-free without a key press (after an area snap). Ends on a pause or a tap.
-    func listenNow() {
+    func listenNow(wait: Double? = nil) {
         if phase == .wake { stopWake() }
         guard phase == .idle else { return }
         arm(uptime())
+        nothingWait = min(15, max(3, wait ?? 8))
         phase = .handsFree
         blocked = true // the snap shortcut's keys may still be held: don't read them as a tap
         showListening("handsfree", uptime())
@@ -1344,7 +1348,7 @@ Thread.detachNewThread {
         guard let data = line.data(using: .utf8), let msg = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { continue }
         switch msg["cmd"] as? String {
         case "cancel": DispatchQueue.main.async { voice.externalCancel() }
-        case "listen": DispatchQueue.main.async { voice.listenNow() }
+        case "listen": let wait = msg["wait"] as? Double; DispatchQueue.main.async { voice.listenNow(wait: wait) }
         // The sidekick is answering (it appears where the cursor is): the listening pill can go.
         case "handoff": DispatchQueue.main.async { voice.wave.hide() }
         // The sidekick following the cursor in its cursor form, drawn here (buddy.swift) until the page takes it back.

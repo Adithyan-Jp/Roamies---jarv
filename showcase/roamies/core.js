@@ -475,6 +475,9 @@
   // Rectangles covering where test(x, y) is true inside box [x, y, w, h], sampled every `cell` px: a run of hits
   // along a row is one rectangle, and the same run on the rows below grows it. Flat [x, y, w, h, …] in whole px,
   // each grown by `pad` all round (what's sampled moves, and the shape made from these is set a moment later).
+  // Text in a right-to-left script (Hebrew, Arabic, Syriac, Thaana, N'Ko and their presentation forms, #69).
+  const RTL = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
+  R.rtl = (s) => RTL.test(String(s ?? ''));
   R.hitRects = (test, box, cell = 12, pad = 8) => {
     const out = [];
     const x0 = Math.floor(box[0]), y0 = Math.floor(box[1]), cols = Math.ceil(box[2] / cell), rows = Math.ceil(box[3] / cell);

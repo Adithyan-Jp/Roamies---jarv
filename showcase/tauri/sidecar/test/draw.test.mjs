@@ -415,3 +415,24 @@ console.log('shape radius tests: passed');
   assert.ok(x / world.q >= b[0] - 0.1 && x / world.q <= b[2] + 0.1 && y / world.q >= b[1] - 0.1 && y / world.q <= b[3] + 0.1, 'outlines are in degrees × q');
   console.log('world outline tests: passed');
 }
+{ // Gemini Flash-Lite's shapes (#81, from a user's log): a lone mark's fields on its beat or on the call, label for a
+  // button's text. Each is moved into marks, so the card draws instead of failing or drawing nothing.
+  const tidy = (a) => DrawArgs.parse(a);
+  const onBeat = tidy({ beats: [{ say: 'Steps.', kind: 'card', heading: 'Change Your Wallpaper', items: ['Open Settings', 'Pick Background'] }] });
+  assert.deepEqual(onBeat.beats[0].marks, [{ kind: 'card', heading: 'Change Your Wallpaper', items: ['Open Settings', 'Pick Background'] }]);
+  assert.deepEqual(checkDraw(onBeat), []);
+  const emptyMarks = tidy({ beats: [{ say: 'Ha.', kind: 'card', heading: 'Ben 23 vs Ben Prime', items: ['Drip'], marks: [] }] });
+  assert.equal(emptyMarks.beats[0].marks[0].heading, 'Ben 23 vs Ben Prime', 'marks: [] with the card on the beat');
+  const onCall = tidy({ card_size: 'small', items: ['Open Windows Settings'], heading: 'Change Your Wallpaper', beats: [{ say: 'Here.', marks: [{ kind: 'card' }] }] });
+  assert.deepEqual(onCall.beats[0].marks, [{ kind: 'card', card_size: 'small', items: ['Open Windows Settings'], heading: 'Change Your Wallpaper' }]);
+  const sayOnCall = tidy({ say: 'Groups.', beats: [{ kind: 'mindmap', title: 'Groups', branches: [{ text: 'Metals' }, { text: 'Gases' }] }] });
+  assert.equal(sayOnCall.beats[0].say, 'Groups.'); assert.equal(sayOnCall.beats[0].marks[0].kind, 'mindmap'); assert.deepEqual(checkDraw(sayOnCall), []);
+  const button = tidy({ beats: [{ say: 'Go.', marks: [{ kind: 'button', label: 'Open Settings', action: { do: 'open', value: 'ms-settings:' } }] }] });
+  assert.equal(button.beats[0].marks[0].text, 'Open Settings'); assert.deepEqual(checkDraw(button), []);
+  assert.equal(tidy({ beats: [{ say: 'Hi.', kind: 'card', title: 'Hello' }] }).beats[0].marks[0].heading, 'Hello', "a card's title as its heading");
+  // Well-formed calls are left as they are; two marks and a stray field aren't guessed at.
+  const fine = { beats: [{ say: 'x', marks: [{ kind: 'card', heading: 'A' }] }] };
+  assert.deepEqual(tidy(fine), fine);
+  assert.equal(tidy({ beats: [{ say: 'x', heading: 'H', marks: [{ kind: 'card', text: 'a' }, { kind: 'card', text: 'b' }] }] }).beats[0].marks.every((m) => !m.heading), true);
+  console.log('draw tidy tests: passed');
+}

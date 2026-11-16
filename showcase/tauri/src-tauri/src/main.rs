@@ -1046,9 +1046,8 @@ fn move_sidekick_to(app: &AppHandle, x: f64, y: f64) {
     #[cfg(not(target_os = "macos"))]
     {
         let _ = w.set_position(*mon.position());
-        // Linux: a pixel short, as when it was made (build_overlays).
-        let short = if cfg!(target_os = "linux") { 1 } else { 0 };
-        let _ = w.set_size(tauri::PhysicalSize::new(mon.size().width, mon.size().height.saturating_sub(short)));
+        // A pixel short, as when it was made (build_overlays).
+        let _ = w.set_size(tauri::PhysicalSize::new(mon.size().width, mon.size().height.saturating_sub(1)));
     }
     let _ = w.eval(safe_js(&mon));
     let _ = w.eval("window.__roamieMoved&&__roamieMoved()");
@@ -1074,11 +1073,13 @@ fn build_overlays(app: &AppHandle) -> tauri::Result<()> {
         let pos = mon.position().to_logical::<f64>(scale);
         let size = mon.size().to_logical::<f64>(scale);
         let init = format!("window.ROAMIE_ONLY=[{}];window.ROAMIE_AUTOSOUND=true;window.ROAMIE_UNIT=400;", mine.join(","));
-        // Linux: the page reports its click areas (host.js), and the window stops a pixel short of the screen:
-        // window managers take an undecorated window of exactly the screen's size for a fullscreen app (GNOME
-        // then hides its top bar).
+        // Linux: the page reports its click areas (host.js). Linux and Windows: the window stops a pixel short of the
+        // screen, as one of exactly its size is taken for a fullscreen app (GNOME then hides its top bar; Windows
+        // draws a strip by an auto-hidden taskbar, #58).
         #[cfg(target_os = "linux")]
-        let (init, size) = (format!("{init}window.ROAMIE_LINUX={:?};", linux::session().name()), tauri::LogicalSize::new(size.width, size.height - 1.0));
+        let init = format!("{init}window.ROAMIE_LINUX={:?};", linux::session().name());
+        #[cfg(not(target_os = "macos"))]
+        let size = tauri::LogicalSize::new(size.width, size.height - 1.0);
         let label = format!("overlay-{gen}-{i}");
         if mine.iter().any(|id| id == "\"sidekick\"") {
             *SIDEKICK_OVERLAY.lock().unwrap() = Some(label.clone());
@@ -1591,7 +1592,8 @@ fn handle_sidecar(app: &AppHandle, msg: Value) {
             WRITE_CHORD.store(write.unwrap_or(0), Ordering::Relaxed);
         }
         // Listen right away, hands-free (after an area snap: snap, then just talk).
-        Some("listen") => to_voice(app, &json!({ "cmd": "listen" })),
+        // wait: seconds the mic waits for words (auto-listen's setting, #44).
+        Some("listen") => to_voice(app, &json!({ "cmd": "listen", "wait": msg.get("wait").cloned().unwrap_or(Value::Null) })),
         // Linux: the sidecar's screenshot and copy go through the shell (GTK, X11 and the desktop portal).
         #[cfg(target_os = "linux")]
         Some("screenshot") => {

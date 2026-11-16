@@ -728,6 +728,18 @@
         const edge = Math.min(1, fadeTop ? (cy / lh) * 1.2 : 1, fadeBot ? ((ih - cy) / lh) * 1.2 : 1);
         if (edge <= 0.02) continue;
         tctx.globalAlpha = clamp(edge, 0, 1);
+        // Arabic and Hebrew: the line is drawn whole, right-aligned, so letters join and run right to left (letter
+        // by letter on the grid they came out disjoined and backwards, #69). It drops per-letter styling there.
+        if (R.rtl(line.s)) {
+          const n = Math.min(line.s.length, shown - line.start);
+          if (n > 0) {
+            if (curFont !== fontFor(0)) { curFont = fontFor(0); tctx.font = curFont; }
+            tctx.fillStyle = ink; tctx.direction = 'rtl'; tctx.textAlign = 'right';
+            tctx.fillText(line.s.slice(0, n).trimEnd(), iw, cy, iw);
+            tctx.direction = 'ltr'; tctx.textAlign = 'left';
+          }
+          continue;
+        }
         for (let j = 0; j < line.s.length; j++) {
           const idx = line.start + j;
           if (idx >= shown) break;
@@ -1164,7 +1176,9 @@
         const onStage = stage();
         if (presence.auto) {
           const hover = env.mouse?.active && Math.hypot(env.mouse.x - m.x, env.mouse.y - m.y) < k.R * 1.5;
-          const busyNow = b || dying.length || tool || pen.held || now < actUntil || m.dragging || m.flung || hover || k.presence === 'in' || R.panel?.working;
+          // Still talking counts: an answer moved onto the card has no bubble left to keep it here, and leaving
+          // mid-sentence left nothing on screen to stop it with.
+          const busyNow = b || dying.length || tool || pen.held || now < actUntil || m.dragging || m.flung || hover || k.presence === 'in' || R.panel?.working || R.voiceOut?.playing();
           if (busyNow) presence.lastActive = now;
           const idleFor = presence.summoned ? presence.summonIdle : presence.idle;
           if (k.presence === 'shown' && now - presence.lastActive > idleFor) { presence.summoned = false; k.vanish(nextVariant()); }

@@ -4,6 +4,11 @@
 (() => {
   const R = window.Roamie;
   const LEAD = 0.12; // cushion before a reply's first chunk, so the next chunk is never late
+  // Linux (WebKitGTK, #80): a chunk that comes just after the audio ran out (a stream in bursts, or an audio clock
+  // running ahead over Bluetooth) restarts it behind a cushion that doubles each time, so the rest join up. Longer
+  // pauses (a tool running) don't count; it eases back after a reply with none late. Elsewhere it stays LEAD.
+  const ADAPT = !!window.ROAMIE_LINUX, MAX_LEAD = 1, JITTER = 0.5;
+  let lead = LEAD, late = false;
   let ac = null, out = null, meter = null, buf = null, id = null, endAt = 0, live = [], lv = 0;
   // How fast the voice talks (characters a second), learned from each whole reply: its audio length against how much
   // text it said. Drawings pace their marks to it (ink.js).
@@ -44,12 +49,15 @@
 
   const play = (m) => {
     const a = ctx();
-    if (m.id !== id) { stop(); id = m.id; secs = 0; }
+    if (m.id !== id) { stop(); id = m.id; secs = 0; if (!late) lead = Math.max(LEAD, lead * 0.75); late = false; }
     const b = pcm(m.pcm, m.rate || 44100), s = a.createBufferSource();
     s.buffer = b; s.connect(out);
     const now = a.currentTime;
     if (!live.length) { out.gain.cancelScheduledValues(now); out.gain.setValueAtTime(1, now); }
-    const at = Math.max(endAt, now + LEAD);
+    const gap = endAt ? now - endAt : 0; // > 0: what was queued has already played out
+    let cushion = LEAD;
+    if (ADAPT && gap > 0 && gap < JITTER) { late = true; lead = Math.min(MAX_LEAD, lead * 2); cushion = lead; }
+    const at = Math.max(endAt, now + cushion);
     s.start(at); endAt = at + b.duration; secs += b.duration;
     live.push(s);
     s.onended = () => { live = live.filter((x) => x !== s); };
@@ -67,6 +75,7 @@
     },
     playing: () => !!ac && live.length > 0 && ac.currentTime < endAt + 0.05,
     cps: () => rate,
+    lead: () => lead,
     // That reply has nothing left to play: its end arrived (or it was stopped), and nothing is still sounding.
     finished(rid) { return !this.playing() && (!rid || over.has(rid)); },
     // Smoothed RMS, roughly 0 (quiet) to 1 (loud speech).

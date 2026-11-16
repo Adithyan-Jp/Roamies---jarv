@@ -112,10 +112,20 @@ export const downNote = (server, reason) => (/rejected the API key/.test(reason 
   : `${server.label} isn't running${server.custom ? ` at ${server.baseUrl}` : ''}.`);
 
 /** What to tell the user when a server serves too small a context, else ''. */
-export const contextNote = (window, server = OLLAMA) => {
-  if (!window || window >= MIN_CONTEXT) return '';
+// Lite mode (#73) sends far less each time, so half the memory is enough.
+export const LITE_MIN_CONTEXT = 16_384;
+export const contextNote = (window, server = OLLAMA, lite = false) => {
+  const min = lite ? LITE_MIN_CONTEXT : MIN_CONTEXT, need = `${min / 1024}k`;
+  if (!window || window >= min) return '';
   const k = Math.round(window / 1024);
-  if (server.id === 'ollama') return `Ollama gives this model only ${k}k tokens of memory, too little for me to work well. In Ollama's settings, set Context length to 32k or more (or start it with OLLAMA_CONTEXT_LENGTH=32768), then pick the model again.`;
-  if (server.id === 'lmstudio') return `LM Studio gives this model only ${k}k tokens of memory (or hasn't loaded it yet), too little for me to work well. In LM Studio, load it with Context Length set to 32k or more, then pick the model again.`;
-  return `${server.label} says this model has only ${k}k tokens of memory (or didn't say), too little for me to work well. Start it with a context of 32k or more, then pick the model again.`;
+  if (server.id === 'ollama') return `Ollama gives this model only ${k}k tokens of memory, too little for me to work well. In Ollama's settings, set Context length to ${need} or more (or start it with OLLAMA_CONTEXT_LENGTH=${min}), then pick the model again.`;
+  if (server.id === 'lmstudio') return `LM Studio gives this model only ${k}k tokens of memory (or hasn't loaded it yet), too little for me to work well. In LM Studio, load it with Context Length set to ${need} or more, then pick the model again.`;
+  return `${server.label} says this model has only ${k}k tokens of memory (or didn't say), too little for me to work well. Start it with a context of ${need} or more, then pick the model again.`;
 };
+// A model's size from its name ("qwen3.5:9b", "gemma-4-e4b-it", "llama-3.2-3B-instruct"), in billions; null when the
+// name doesn't say. Small (9B or less) is when Lite mode is suggested.
+export const modelBillions = (id) => {
+  const m = /(?:^|[^a-z0-9.])e?(\d+(?:\.\d+)?)b(?![a-z0-9])/i.exec(String(id ?? ''));
+  return m ? Number(m[1]) : null;
+};
+export const isSmallModel = (id) => { const b = modelBillions(id); return b != null && b <= 9; };

@@ -189,6 +189,8 @@ struct Voice {
     chord: u8,
     chord_at: f64,
     listen_at: f64,
+    /// How long a hands-free take waits for words before giving up (auto-listen's setting; 8 s otherwise).
+    nothing_wait: f64,
     heard_at: f64,
     voice_at: f64,
     floor: NoiseFloor,
@@ -225,6 +227,7 @@ impl Voice {
             chord: keys::mask(&["control".into(), "option".into()]).expect("default chord"),
             chord_at: 0.0,
             listen_at: 0.0,
+            nothing_wait: 8.0,
             heard_at: 0.0,
             voice_at: 0.0,
             floor: NoiseFloor::default(),
@@ -350,7 +353,7 @@ impl Voice {
                 } else if !self.best.is_empty() && stale > STALE_ENDS {
                     self.end("no new words", now);
                     self.finish();
-                } else if self.best.is_empty() && !self.reading && now - self.listen_at > 8.0 && now - self.voice_at > PAUSE_ENDS {
+                } else if self.best.is_empty() && !self.reading && now - self.listen_at > self.nothing_wait && now - self.voice_at > PAUSE_ENDS {
                     self.end("nothing heard", now);
                     self.cancel();
                 } else if now - self.listen_at > MAX_SESSION {
@@ -368,6 +371,7 @@ impl Voice {
 
     fn arm(&mut self, now: f64) {
         self.phase = Phase::Armed;
+        self.nothing_wait = 8.0;
         self.chord_at = now;
         self.best.clear();
         self.spoke = false;
@@ -559,12 +563,13 @@ impl Voice {
     }
 
     /// Start listening hands-free without a key press (after an area snap). Ends on a pause or a tap.
-    fn listen_now(&mut self) {
+    fn listen_now(&mut self, wait: Option<f64>) {
         if self.phase != Phase::Idle {
             return;
         }
         let now = self.now();
         self.arm(now);
+        self.nothing_wait = wait.unwrap_or(8.0).clamp(3.0, 15.0);
         self.phase = Phase::HandsFree;
         self.blocked = true; // the snap shortcut's keys may still be held: don't read them as a tap
         self.show_listening("handsfree", now);
@@ -574,7 +579,7 @@ impl Voice {
     /// hands-free, the next one sends what was said (so does a pause).
     fn toggle(&mut self) {
         match self.phase {
-            Phase::Idle => self.listen_now(),
+            Phase::Idle => self.listen_now(None),
             Phase::Armed | Phase::Holding | Phase::HandsFree => {
                 let now = self.now();
                 self.end("toggled", now);
@@ -597,7 +602,7 @@ impl Voice {
         match ev {
             Ev::Cmd(msg) => match msg.get("cmd").and_then(Value::as_str) {
                 Some("cancel") => self.external_cancel(),
-                Some("listen") => self.listen_now(),
+                Some("listen") => self.listen_now(msg.get("wait").and_then(Value::as_f64)),
                 Some("toggle") => self.toggle(),
                 // The panel's mic picker: the list, and a pick (a name from it; none or "" is the default), used from the
                 // next time the mic opens.

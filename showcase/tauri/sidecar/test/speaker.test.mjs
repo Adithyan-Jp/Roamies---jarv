@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createSpeaker, BEATS, bundledBeats, PROVIDERS, trimSilence } from '../speaker.mjs';
+import { createSpeaker, BEATS, bundledBeats, PROVIDERS, trimSilence, voiceProblemText } from '../speaker.mjs';
 import { FISH_MODELS } from '../fish.mjs';
 import { readFileSync } from 'node:fs';
 
@@ -368,4 +368,23 @@ console.log('bundled beats: passed');
   assert.equal(made.at(-1).model, 'drama-3'); assert.deepEqual(made.at(-1).said, ['Fish again.']);
   sp.setProvider('nope'); assert.equal(sp.provider, 'fish', 'unknown providers are ignored');
   console.log('speaker provider tests: passed');
+}
+{ // A key check doesn't prove the service will speak (#72): probe says one line, and a refusal comes back with its reason.
+  const { sp } = setup();
+  sp.setKey('k'); await tick();
+  const good = sp.probe(); made.at(-1).onAudio(new Uint8Array([0, 0]));
+  assert.deepEqual(await good, { ok: true }); assert.ok(made.at(-1).aborted, 'the audio is thrown away');
+  const bad = sp.probe();
+  assert.deepEqual(made.at(-1).said, ['Hi.']);
+  made.at(-1).onError(Object.assign(new Error('Gemini: User location is not supported for the API use.'), { status: 400, heard: false }));
+  assert.deepEqual(await bad, { ok: false, status: 400, message: 'Gemini: User location is not supported for the API use.' });
+  const { sp: none } = setup();
+  assert.equal((await none.probe()).ok, false, 'no key, nothing to try');
+}
+{ // A failed voice is said with the service's own reason, not a bare "isn't working" (#72).
+  assert.equal(voiceProblemText('Gemini: User location is not supported for the API use.', 'Gemini'), "My voice isn't working right now: User location is not supported for the API use. Replies are text for now.");
+  assert.equal(voiceProblemText('Gemini is rate limiting (the free allowance may be used up for now)', 'Gemini'), "My voice isn't working right now: Gemini is rate limiting (the free allowance may be used up for now). Replies are text for now.");
+  assert.equal(voiceProblemText('key', 'Gemini'), "My Gemini key isn't working, so replies are text for now.");
+  assert.equal(voiceProblemText(undefined, 'Gemini'), "My voice isn't working right now, so replies are text for now.");
+  console.log('speaker probe tests: passed');
 }

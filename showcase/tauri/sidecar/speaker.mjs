@@ -65,6 +65,14 @@ export function bundledBeats(dir = path.join(path.dirname(fileURLToPath(import.m
   };
 }
 
+// What the overlay says when a reply's voice fails (onProblem's argument): the service's own reason when there is one.
+export const voiceWhy = (message) => String(message ?? '').replace(/^(Gemini|Fish Audio):\s*/, '').replace(/[.\s]+$/, '');
+export function voiceProblemText(what, name) {
+  if (what === 'key') return `My ${name} key isn't working, so replies are text for now.`;
+  const why = typeof what === 'string' ? voiceWhy(what) : '';
+  return why ? `My voice isn't working right now: ${why}. Replies are text for now.` : "My voice isn't working right now, so replies are text for now.";
+}
+
 // beatStore: { read(name), write(name, data) }, where beats made here are kept between runs (none: made again each run).
 export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, FishVoiceImpl = FishVoice, account = fishAccount, providers = {}, beatPhrases = BEATS, bundled = bundledBeats(), beatStore = null, LocalVoiceImpl = StudioVoice, localStatus = studioStatus }) {
   const all = { ...PROVIDERS, fish: { ...PROVIDERS.fish, Voice: FishVoiceImpl, account }, ...providers };
@@ -273,6 +281,16 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
       if (key) warm();
     },
     get pick() { return pref; },
+    // One short line spoken with the key, voice and model now set, its audio thrown away: the account check only says
+    // the key is real, not that the service will speak with it (Gemini refuses some regions; free allowances run out).
+    // { ok: true } or { ok: false, status, message }.
+    probe(text = 'Hi.') {
+      if (localOn || !key) return Promise.resolve(localOn ? { ok: true } : { ok: false, status: null, message: 'no key' });
+      return new Promise((done) => {
+        const v = new P.Voice({ key, voice, model, onAudio: () => { v.abort(); done({ ok: true }); }, onEnd: () => done({ ok: true }), onError: (e) => done({ ok: false, status: e.status ?? null, message: e.message }) }).open();
+        v.say(text); v.end();
+      });
+    },
     setVoice(v) { if ((v || P.defaultVoice) !== voice) beats = new Map(); voice = v || P.defaultVoice; if (key) warm(); },
     // Fish Audio, Gemini or VoiceStudio. Starts clean: the key, voice and model are the old service's, so set them again after.
     setProvider(id) {

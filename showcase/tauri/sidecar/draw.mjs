@@ -75,14 +75,41 @@ const Mark = z.object({
   action: z.object({ do: z.enum(['ask', 'open', 'copy']), value: z.string().min(1).max(600) }).optional(),
   task: z.string().max(120).optional(),
 });
+// Some models (Gemini Flash-Lite, #81) put a lone mark's fields on its beat or on the call itself instead of in marks,
+// a button's text as label, a card's heading as title: moved where they go before the schema sees them.
+const BEAT_KEYS = new Set(['say', 'marks', 'wait']), CALL_KEYS = new Set(['target', 'beats', 'edit', 'deep']);
+const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+const loose = (o, keep) => Object.fromEntries(Object.entries(o).filter(([k]) => !keep.has(k)));
+function tidyMark(m) {
+  if (!isObj(m)) return m;
+  if (m.kind === 'button' && !m.text && typeof m.label === 'string') return { ...m, text: m.label };
+  if (m.kind === 'card' && !m.text && !m.heading && typeof m.title === 'string') return { ...m, heading: m.title };
+  return m;
+}
+function tidyBeat(b) {
+  if (!isObj(b)) return b;
+  const extra = loose(b, BEAT_KEYS);
+  let marks = b.marks ?? [];
+  if (Object.keys(extra).length && Array.isArray(marks)) {
+    if (!marks.length && extra.kind) marks = [extra];
+    else if (marks.length === 1 && isObj(marks[0]) && (!extra.kind || extra.kind === marks[0].kind)) marks = [{ ...extra, ...marks[0] }];
+  }
+  return { ...b, marks: Array.isArray(marks) ? marks.map(tidyMark) : marks };
+}
+export function tidyDraw(a) {
+  if (!isObj(a) || !Array.isArray(a.beats)) return a;
+  const extra = loose(a, CALL_KEYS);
+  const beats = Object.keys(extra).length && a.beats.length === 1 && isObj(a.beats[0]) ? [{ ...extra, ...a.beats[0] }] : a.beats;
+  return { ...a, beats: beats.map(tidyBeat) };
+}
 const Beat = z.object({ say: z.string().min(1).max(240), marks: z.array(Mark).max(LIMITS.marks), wait: z.enum(['click', 'hover']).optional() });
 const Edit = z.object({ do: z.enum(['recolor', 'move', 'erase', 'clear']), part: z.string().max(8).optional(), tone: z.enum(TONES).optional(), dx: num.optional(), dy: num.optional() });
-export const DrawArgs = z.object({
+export const DrawArgs = z.preprocess(tidyDraw, z.object({
   target: z.string().optional(),
   beats: z.array(Beat).max(LIMITS.beats).optional(),
   edit: z.array(Edit).max(20).optional(),
   deep: z.boolean().optional(),
-});
+}));
 
 const hasAt = (t) => !!t && (t.text != null || t.id != null || (t.x != null && t.y != null));
 /** Everything wrong with a draw call that the schema can't say, as lines for the model; [] when it's fine. */

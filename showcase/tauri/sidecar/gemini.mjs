@@ -134,7 +134,7 @@ export class GeminiVoice {
       });
       if (!r.ok) {
         const said = (await r.text().catch(() => '')).match(/"message"\s*:\s*"((?:\\.|[^"\\])*)"/)?.[1];
-        throw Object.assign(new Error(r.status === 429 ? 'Gemini is rate limiting' : `Gemini: ${said ?? `error ${r.status}`}`), { status: r.status });
+        throw Object.assign(new Error(r.status === 429 ? 'Gemini is rate limiting (the free allowance may be used up for now)' : `Gemini: ${said ?? `error ${r.status}`}`), { status: r.status });
       }
       const text = new TextDecoder();
       let rest = '', got = false;

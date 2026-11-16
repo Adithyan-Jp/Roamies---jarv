@@ -171,3 +171,9 @@ export function endsWithQuestion(text) {
     .replace(/[\s*_~`"'”’»)\]]+$/u, '');
   return /[?？]$/.test(s);
 }
+
+// Auto-listen (#44): after a spoken reply that asks something, or after every one if they chose so. The mic then
+// waits one of these many seconds for words (8 unless picked).
+export const LISTEN_SECS = [3, 5, 8, 10, 15];
+export const listenWait = (secs) => (LISTEN_SECS.includes(secs) ? secs : 8);
+export const listensAfter = (reply, every) => !!every || endsWithQuestion(reply);

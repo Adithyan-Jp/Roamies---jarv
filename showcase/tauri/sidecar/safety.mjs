@@ -407,6 +407,7 @@ export function checkOpen(target, home, { executable = false } = {}) {
   const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(t)?.[1]?.toLowerCase();
   if (scheme && !/^[a-z]:\\/i.test(t)) {
     if (scheme === 'http' || scheme === 'https' || scheme === 'mailto') return verdict(SAFE);
+    if (scheme === 'ms-settings') return verdict(SAFE); // a page of Windows Settings, nothing that runs (#81)
     return verdict(BLOCK, `I only open web and mail links, not ${scheme}: links.`);
   }
   if (/^[~/.]/.test(t) || /^[a-z]:\\/i.test(t)) {

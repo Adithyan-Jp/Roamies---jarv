@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { SpeechText, speakable, CueFilter, VOICE_CUES, CUE_INTENSITY, endsWithQuestion } from '../speech.mjs';
+import { SpeechText, speakable, CueFilter, VOICE_CUES, CUE_INTENSITY, endsWithQuestion, LISTEN_SECS, listenWait, listensAfter } from '../speech.mjs';
 
 const said = (chunks, flushAt = []) => {
   const out = [];
@@ -128,3 +128,12 @@ assert.equal(endsWithQuestion('Ready? 🙂\n'), true);
 assert.equal(endsWithQuestion('He said "really?"'), true);
 assert.equal(endsWithQuestion(''), false);
 assert.equal(endsWithQuestion(null), false);
+
+// Auto-listen after every reply (#44): a statement opens the mic too when they chose it; a question always does.
+assert.equal(listensAfter('Done, the file is saved.', false), false);
+assert.equal(listensAfter('Done, the file is saved.', true), true);
+assert.equal(listensAfter('Want me to open it?', false), true);
+// How long the mic waits: one of the choices, else 8 s (an old or hand-edited config).
+assert.deepEqual(LISTEN_SECS, [3, 5, 8, 10, 15]);
+for (const s of LISTEN_SECS) assert.equal(listenWait(s), s);
+for (const s of [undefined, 0, 2, 7, 60, '5']) assert.equal(listenWait(s), 8);

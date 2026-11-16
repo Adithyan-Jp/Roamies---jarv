@@ -77,6 +77,8 @@ cases('open', (t) => checkOpen(t, HOME), [
   ['file:///etc/passwd', BLOCK], ['javascript:alert(1)', BLOCK], ['ssh://evil', BLOCK], ['x-apple.systempreferences:com.apple', BLOCK],
   ['~/Downloads/installer.pkg', BLOCK], ['~/Downloads/run.command', BLOCK], ['~/Downloads/Evil.app', BLOCK], ['~/Desktop/a.sh', BLOCK],
   ['~/Downloads/x.dmg', BLOCK], ['/bin/zsh', BLOCK], ['/usr/bin/python3', BLOCK], ['~/.ssh', BLOCK], ['../../bin/sh', BLOCK], ['', BLOCK],
+  // A Windows Settings page opens (#81); other Windows links still don't.
+  ['ms-settings:personalization-background', SAFE], ['ms-windows-store://pdp/?productid=x', BLOCK], ['ms-msdt:/id x', BLOCK], ['search-ms:query=x', BLOCK],
 ]);
 
 assert.equal(checkOpen('~/tools/runme', HOME, { executable: true }).level, BLOCK, 'executable files without an extension');

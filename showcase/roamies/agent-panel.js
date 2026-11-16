@@ -87,13 +87,14 @@
     const e = mk(blk.t);
     if (blk.t === 'ol' && blk.start !== 1) e.start = blk.start;
     if (blk.t === 'ol') e.style.counterReset = `n ${blk.start - 1}`;
-    for (const it of blk.items) { const li = mk('li'); spans(li, it.c); if (it.sub) li.append(list(it.sub)); e.append(li); }
+    for (const it of blk.items) { const li = mk('li'); li.dir = 'auto'; spans(li, it.c); if (it.sub) li.append(list(it.sub)); e.append(li); }
     return e;
   };
   const block = (blk) => {
     switch (blk.t) {
-      case 'p': { const p = mk('p', blk.lead ? 'lead' : ''); spans(p, blk.c); return p; }
-      case 'h': { const h = mk('h4'); spans(h, blk.c); return h; }
+      // dir auto: a paragraph in Arabic or Hebrew runs right to left (#69); code stays left to right.
+      case 'p': { const p = mk('p', blk.lead ? 'lead' : ''); p.dir = 'auto'; spans(p, blk.c); return p; }
+      case 'h': { const h = mk('h4'); h.dir = 'auto'; spans(h, blk.c); return h; }
       case 'ul': case 'ol': return list(blk);
       case 'quote': { const q = mk('blockquote'); for (const b of blk.c) q.append(block(b)); return q; }
       case 'code': { const pre = mk('pre'), c = mk('code'); c.textContent = blk.s; pre.append(c); return pre; }
@@ -101,9 +102,9 @@
       case 'src': { const p = mk('p', 'rp-src'); p.append('Sources: '); spans(p, blk.c); return p; }
       case 'table': {
         const wrapEl = mk('div', 'rp-table'), t = mk('table'), thead = mk('thead'), tb = mk('tbody'), hr = mk('tr');
-        for (const c of blk.head) { const th = mk('th'); th.scope = 'col'; spans(th, c); hr.append(th); }
+        for (const c of blk.head) { const th = mk('th'); th.scope = 'col'; th.dir = 'auto'; spans(th, c); hr.append(th); }
         thead.append(hr);
-        for (const r of blk.rows) { const tr = mk('tr'); for (const c of r) { const td = mk('td'); spans(td, c); tr.append(td); } tb.append(tr); }
+        for (const r of blk.rows) { const tr = mk('tr'); for (const c of r) { const td = mk('td'); td.dir = 'auto'; spans(td, c); tr.append(td); } tb.append(tr); }
         t.append(thead, tb); wrapEl.append(t);
         return wrapEl;
       }
@@ -112,7 +113,7 @@
   };
   const render = (body, text, streaming) => {
     const md = R.md;
-    body.replaceChildren(...(md ? md.blocks(text).map(block) : [Object.assign(mk('p'), { textContent: text })]));
+    body.replaceChildren(...(md ? md.blocks(text).map(block) : [Object.assign(mk('p'), { textContent: text, dir: 'auto' })]));
     if (streaming) {
       const caret = mk('span', 'rp-caret'); caret.setAttribute('aria-hidden', 'true');
       let host = body.lastElementChild ?? body;
