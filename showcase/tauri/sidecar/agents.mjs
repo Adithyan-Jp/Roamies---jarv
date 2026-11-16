@@ -377,7 +377,10 @@ export function createAgents({ fork, ui, config, root, userName = 'The user', ru
       p.event = now(); a.turns++; a.tokens.in += m.usage?.in ?? 0; a.tokens.out += m.usage?.out ?? 0;
       if (a.turns > LIMITS.turns) stop(a.id, { state: 'failed', reason: `Used all its ${LIMITS.turns} turns` });
     } else if (m.t === 'plan') { p.event = now(); a.step = one(m.text, 60); update(a); }
-    else if (m.t === 'ask') {
+    else if (m.t === 'ask' && config.skipAllow?.()) {
+      // "Skip Allow prompts": the agent's yes/no is answered yes here, and nothing else changes (BLOCK verdicts never ask).
+      if (p.child.connected) p.child.send({ t: 'reply', id: m.id, value: true });
+    } else if (m.t === 'ask') {
       if (a.state === 'working') { a.workMs += now() - a.workFrom; a.workFrom = null; }
       a.state = 'waiting'; a.told = false; a.ask = { id: m.id, question: one(m.question, 300) };
       tell('ask', a); saveState(a);
