@@ -1178,7 +1178,155 @@ fn full_frame_rate(w: &WebviewWindow) {
     });
 }
 
+/// One NSScreen: its frame (points: x, width, height; y is flipped, so it isn't compared) and its camera notch,
+/// if any, as (x, w, h) in points relative to the screen's left edge and top.
+#[cfg(target_os = "macos")]
+#[derive(Clone, Copy, Debug)]
+struct ScreenNotch {
+    frame_x: f64,
+    frame_w: f64,
+    frame_h: f64,
+    notch: Option<(f64, f64, f64)>,
+}
+
+#[cfg(target_os = "macos")]
+static SCREEN_NOTCHES: Mutex<Vec<ScreenNotch>> = Mutex::new(Vec::new());
+
+/// Some screen has a camera notch (kept by refresh_screen_notches; always false off macOS).
+static HAS_NOTCH: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_os = "macos")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct NsPoint {
+    x: f64,
+    y: f64,
+}
+
+#[cfg(target_os = "macos")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct NsSize {
+    width: f64,
+    height: f64,
+}
+
+#[cfg(target_os = "macos")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct NsRect {
+    origin: NsPoint,
+    size: NsSize,
+}
+
+#[cfg(target_os = "macos")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct NsEdgeInsets {
+    top: f64,
+    left: f64,
+    bottom: f64,
+    right: f64,
+}
+
+#[cfg(target_os = "macos")]
+unsafe impl objc2::encode::Encode for NsPoint {
+    const ENCODING: objc2::encode::Encoding =
+        objc2::encode::Encoding::Struct("CGPoint", &[f64::ENCODING, f64::ENCODING]);
+}
+
+#[cfg(target_os = "macos")]
+unsafe impl objc2::encode::Encode for NsSize {
+    const ENCODING: objc2::encode::Encoding =
+        objc2::encode::Encoding::Struct("CGSize", &[f64::ENCODING, f64::ENCODING]);
+}
+
+#[cfg(target_os = "macos")]
+unsafe impl objc2::encode::Encode for NsRect {
+    const ENCODING: objc2::encode::Encoding =
+        objc2::encode::Encoding::Struct("CGRect", &[NsPoint::ENCODING, NsSize::ENCODING]);
+}
+
+#[cfg(target_os = "macos")]
+unsafe impl objc2::encode::Encode for NsEdgeInsets {
+    const ENCODING: objc2::encode::Encoding = objc2::encode::Encoding::Struct(
+        "NSEdgeInsets",
+        &[f64::ENCODING, f64::ENCODING, f64::ENCODING, f64::ENCODING],
+    );
+}
+
+/// Reads every NSScreen's frame and camera notch into SCREEN_NOTCHES. AppKit: call on the main thread.
+/// Notch = the gap between the two top auxiliary areas, below the menu bar (safeAreaInsets.top > 0).
+/// Returns true when whether any screen has a notch changed.
+#[cfg(target_os = "macos")]
+fn refresh_screen_notches() -> bool {
+    use objc2::runtime::{AnyClass, AnyObject, Bool};
+    use objc2::{msg_send, sel};
+    let mut out = Vec::new();
+    unsafe {
+        let Some(cls) = AnyClass::get(c"NSScreen") else { return false };
+        let screens: *mut AnyObject = msg_send![cls, screens];
+        if screens.is_null() {
+            return false;
+        }
+        let n: usize = msg_send![screens, count];
+        for i in 0..n {
+            let s: *mut AnyObject = msg_send![screens, objectAtIndex: i];
+            if s.is_null() {
+                continue;
+            }
+            let frame: NsRect = msg_send![s, frame];
+            let mut notch = None;
+            // safeAreaInsets and the auxiliary areas are macOS 12+.
+            let has_insets: Bool = msg_send![s, respondsToSelector: sel!(safeAreaInsets)];
+            let has_aux: Bool = msg_send![s, respondsToSelector: sel!(auxiliaryTopLeftArea)];
+            let has_aux_r: Bool = msg_send![s, respondsToSelector: sel!(auxiliaryTopRightArea)];
+            if has_insets.as_bool() && has_aux.as_bool() && has_aux_r.as_bool() {
+                let insets: NsEdgeInsets = msg_send![s, safeAreaInsets];
+                if insets.top > 0.0 {
+                    let left: NsRect = msg_send![s, auxiliaryTopLeftArea];
+                    let right: NsRect = msg_send![s, auxiliaryTopRightArea];
+                    if left.size.width > 0.0 && right.size.width > 0.0 {
+                        let left_end = left.origin.x + left.size.width;
+                        let w = right.origin.x - left_end;
+                        if w > 0.0 && w <= 400.0 {
+                            notch = Some((left_end - frame.origin.x, w, insets.top));
+                        }
+                    }
+                }
+            }
+            out.push(ScreenNotch {
+                frame_x: frame.origin.x,
+                frame_w: frame.size.width,
+                frame_h: frame.size.height,
+                notch,
+            });
+        }
+    }
+    let any = out.iter().any(|s| s.notch.is_some());
+    *SCREEN_NOTCHES.lock().unwrap() = out;
+    HAS_NOTCH.swap(any, Ordering::SeqCst) != any
+}
+
+/// The notch of the screen whose frame matches a monitor (logical x, width, height in points), as a JS object
+/// literal, or `null`. Reads the cache SCREEN_NOTCHES, so it's safe from any thread.
+#[cfg(target_os = "macos")]
+fn notch_js(x: f64, w: f64, h: f64) -> String {
+    let all = SCREEN_NOTCHES.lock().unwrap();
+    let hit = all.iter().find(|s| (s.frame_x - x).abs() <= 1.0 && (s.frame_w - w).abs() <= 1.0 && (s.frame_h - h).abs() <= 1.0);
+    match hit.and_then(|s| s.notch) {
+        Some((nx, nw, nh)) => format!("{{x:{nx:.1},w:{nw:.1},h:{nh:.1}}}"),
+        None => "null".into(),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn notch_js(_x: f64, _w: f64, _h: f64) -> String {
+    "null".into()
+}
+
 /// Edges of a monitor covered by the menu bar, Dock or taskbar, in CSS px, as a JS call.
+/// On macOS it also carries the camera notch (see notch_js), or null.
 fn safe_js(mon: &tauri::Monitor) -> String {
     let s = mon.scale_factor();
     let (p, z, wa) = (mon.position(), mon.size(), mon.work_area());
@@ -1189,7 +1337,8 @@ fn safe_js(mon: &tauri::Monitor) -> String {
     // origin: this screen's top-left in global points, so the page can place things given in screen
     // coordinates (like the window being captured).
     let (ox, oy) = (p.x as f64 / s, p.y as f64 / s);
-    format!("window.__roamieSafe&&__roamieSafe({{top:{top:.0},left:{left:.0},bottom:{bottom:.0},right:{right:.0},ox:{ox:.0},oy:{oy:.0}}})")
+    let notch = notch_js(ox, z.width as f64 / s, z.height as f64 / s);
+    format!("window.__roamieSafe&&__roamieSafe({{top:{top:.0},left:{left:.0},bottom:{bottom:.0},right:{right:.0},ox:{ox:.0},oy:{oy:.0},notch:{notch}}})")
 }
 
 /// A screen as the overlays were laid out for it: where it is and its size (physical pixels), and its scale.
@@ -1235,6 +1384,11 @@ fn watch_screens(app: AppHandle) {
         let app2 = app.clone();
         // Monitor queries belong on the main thread (see pump_cursor), and so does making windows.
         let _ = app.run_on_main_thread(move || {
+            // Notches only change with the screens, so this 3 s pass keeps the cache that safe_js reads.
+            #[cfg(target_os = "macos")]
+            if refresh_screen_notches() {
+                to_sidecar(&app2, &json!({ "type": "notch_screen", "on": HAS_NOTCH.load(Ordering::SeqCst) }));
+            }
             let Ok(monitors) = app2.available_monitors() else { return };
             let now = screens(&monitors);
             let have = app2.webview_windows().keys().filter(|l| is_overlay(l)).count();
@@ -1614,6 +1768,10 @@ fn handle_sidecar(app: &AppHandle, msg: Value) {
         Some("wake_hold") => to_voice(app, &json!({ "cmd": "wake_hold", "on": msg.get("on").and_then(Value::as_bool) == Some(true) })),
         // Esc while it's listening: drop the take.
         Some("listen_cancel") => to_voice(app, &json!({ "cmd": "cancel" })),
+        // Notch mode: the capsule at the notch shows the listening, so the pill by the cursor stays off.
+        Some("pill") => to_voice(app, &json!({ "cmd": "pill", "on": msg.get("on").and_then(Value::as_bool) != Some(false) })),
+        // Whether any screen has a camera notch: the notch capsule is only offered then.
+        Some("notch_screen") => to_sidecar(app, &json!({ "type": "notch_screen", "on": HAS_NOTCH.load(Ordering::SeqCst) })),
         // The panel's mic picker: ask for the list, and pass on the pick (an id from it, or "" for automatic).
         Some("voice_mics") => to_voice(app, &json!({ "cmd": "mics" })),
         Some("voice_mic") => to_voice(app, &json!({ "cmd": "mic", "id": msg.get("id").and_then(Value::as_str).unwrap_or("") })),
@@ -1739,6 +1897,8 @@ fn main() {
             if let Err(e) = set_hotkey(1, "Control+Alt+KeyA") {
                 eprintln!("could not register the area shortcut: {e}");
             }
+            #[cfg(target_os = "macos")]
+            refresh_screen_notches();
             build_overlays(app.handle())?;
             pump_cursor(app.handle().clone());
             watch_screens(app.handle().clone());
