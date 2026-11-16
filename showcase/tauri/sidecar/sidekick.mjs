@@ -2328,6 +2328,7 @@ function obState() {
     sound: config.sound,
     voice: VOICE_OK && config.voice,
     autoListen: !!config.autoListen,
+    lite: !!config.lite,
     wakeWord: MAC && !!config.wakeWord,
     voiceModel: NEEDS_MODEL ? { status: voiceModel.status, done: voiceModel.done, total: voiceModel.total, error: voiceModel.error, size: sizeLabel() } : null,
     filesAsked: config.filesAsked,
@@ -2384,6 +2385,7 @@ async function onGuide(m) {
   else if (m.type === 'ob_files') ob({ kind: 'files', status: await filesStatus(!!m.request) });
   else if (m.type === 'set_actions') { config.allowActions = !!m.on; agents.setAllow(config.allowActions); saveConfig(); menu(); obState(); }
   else if (m.type === 'set_login') setLogin(!!m.on);
+  else if (m.type === 'ob_lite') { config.lite = !!m.on; saveConfig(); agentStale = true; menu(); obState(); }
   else if (m.type === 'ob_autolisten') { config.autoListen = !!m.on; saveConfig(); menu(); obState(); }
   else if (m.type === 'ob_wake' && MAC) { config.wakeWord = !!m.on; saveConfig(); agentStale = true; voiceConfig(); menu(); obState(); }
   else if (m.type === 'ob_voice_model') getVoiceModel();
