@@ -284,6 +284,12 @@ fn handle_voice(app: &AppHandle, msg: Value) {
             m["type"] = json!("voice_error");
             to_sidecar(app, &m);
         }
+        // The speech language the helper settled on: its engine, and whether Apple's servers do the recognising.
+        Some("lang") => {
+            let mut m = msg.clone();
+            m["type"] = json!("voice_lang");
+            to_sidecar(app, &m);
+        }
         // The mic list, for the panel's picker.
         Some("mics") => {
             let mut m = msg.clone();
