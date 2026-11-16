@@ -2,8 +2,20 @@
   "updates": [
     {
       "version": "0.1.41",
-      "date": "2026-11-15",
+      "date": "2026-11-17",
       "items": [
+        { "kind": "new", "title": "Out of the notch", "text": "On a Mac with a notch, I can come out of it. See Where I appear. Thanks ihabfawaqa-hue!" },
+        { "kind": "new", "title": "Lite mode", "text": "A lighter me for small or local models, on the Model page. Thanks Hasnainbro!" },
+        { "kind": "new", "title": "Keep listening", "text": "The mic can open after every reply, for as long as you like. Thanks linuxlesslearner!" },
+        { "kind": "new", "title": "Skip Allow prompts", "text": "I can go ahead without asking. Safety rules still apply. Thanks ihabfawaqa-hue!" },
+        { "kind": "improved", "title": "Replies start sooner", "text": "I get my voice ready while you're still talking. Thanks ihabfawaqa-hue!" },
+        { "kind": "improved", "title": "Arabic and Hebrew", "text": "Right to left text now reads the right way. Thanks a8548363-hub!" },
+        { "kind": "improved", "title": "Picking a model", "text": "Setup now explains why I need a sharp model, and which cheap ones work well." },
+        { "kind": "fixed", "title": "Gemini voice errors", "text": "When Gemini can't speak, I say why, and new keys get tested first. Thanks rajivyshah!" },
+        { "kind": "fixed", "title": "Smooth voice on Linux", "text": "Spoken replies no longer play in broken pieces on Linux. Thanks namedtwilit!" },
+        { "kind": "fixed", "title": "No white bar on Windows", "text": "The thin bar at the bottom of the screen on Windows is gone. Thanks Iceman1Freeze!" },
+        { "kind": "fixed", "title": "Opening apps on Windows", "text": "I open more apps and Settings on Windows, and draw more. Thanks walk7heaven37-svg!" },
+        { "kind": "fixed", "title": "I stay for the whole answer", "text": "I no longer vanish while I'm still talking or showing you. Thanks ihabfawaqa-hue!" },
         { "kind": "new", "title": "Deep explanations", "text": "Ask me to explain something in depth: big cards, one step at a time. Thanks LeoU29935!" },
         { "kind": "new", "title": "Game mode", "text": "In fullscreen games I move to a panel at the screen's edge. Thanks LeoU29935!" },
         { "kind": "fixed", "title": "On top on COSMIC", "text": "On COSMIC I now stay on top of your apps, without the dark box. Thanks Swall-wg!" }
