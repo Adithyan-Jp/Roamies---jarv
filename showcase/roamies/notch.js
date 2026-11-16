@@ -35,15 +35,16 @@
   const css = `
 .nc { --ink: ${INK}; --ink-2: rgba(220,255,246,.62); --ink-3: rgba(220,255,246,.38); --accent: ${ACCENT};
   --w: 180px; --h: 32px; --r: 0px; --f: ${FILLET}px;
-  --y: 0px; --sc: 1; --gl: .4; --gr: .4; --glow-a: #6fd6ff; --glow-b: #2a6bff;
+  --y: 0px; --gl: .4; --gr: .4; --glow-a: #6fd6ff; --glow-b: #2a6bff;
   position: fixed; top: var(--y); left: 50%; z-index: 9; box-sizing: border-box; width: var(--w); height: var(--h);
-  translate: -50% 0; transform: scale(var(--sc)); transform-origin: 50% 0;
-  /* Centred with the translate property, not inside transform: the jelly squash (the scale property) runs before
-     translate, so the capsule stays centred on the notch at every size. */ background: #000; color: var(--ink); border-radius: 0 0 var(--r) var(--r);
+  transform-origin: 50% 0;
+  /* Centred by its left edge (the host sets it from var(--w)), never a percentage translate: WebKit freezes those at
+     the size an animation started at, so it came out off-centre. Squash and hover scale are set by the frame loop for
+     the same reason (no animation handed to the GPU). */ background: #000; color: var(--ink); border-radius: 0 0 var(--r) var(--r);
   font: 400 12.5px/20px "Martian Mono", ui-monospace, Menlo, monospace;
   pointer-events: none; visibility: hidden; contain: layout style;
   transition: --w .46s cubic-bezier(.22, 1, .36, 1), --h .4s cubic-bezier(.22, 1, .36, 1), --r .4s cubic-bezier(.22, 1, .36, 1),
-    top .6s cubic-bezier(.3, 1.35, .5, 1), transform .25s cubic-bezier(.2, .8, .2, 1), box-shadow .35s ease, --glow-a .6s ease, --glow-b .6s ease; }
+    top .6s cubic-bezier(.3, 1.35, .5, 1), box-shadow .35s ease, --glow-a .6s ease, --glow-b .6s ease; }
 /* The size is animated through these (not width and height), so what's sized from them (the card, the glow's outline)
    follows the shape frame by frame. */
 @property --w { syntax: '<length>'; inherits: true; initial-value: 180px; }
@@ -53,12 +54,11 @@
 .nc.hot { pointer-events: auto; cursor: default; }
 /* Folding back: no spring, it should look like it's being drawn in. */
 .nc.closing { transition: --w .34s cubic-bezier(.55, 0, .75, .2) .12s, --h .3s cubic-bezier(.5, 0, .7, .3), --r .3s ease-in,
-  top .42s cubic-bezier(.6, 0, .8, .35) .08s, transform .2s ease; }
+  top .42s cubic-bezier(.6, 0, .8, .35) .08s; }
 /* Drop: a floating pill, no fillets (the neck joins it to the notch instead), a shadow to lift it off the page. */
 .nc.drop::before, .nc.drop::after { display: none; }
 .nc.drop { background: #000; border-radius: var(--r); }
 .nc.drop.compact, .nc.drop.full { box-shadow: 0 12px 32px rgba(0, 0, 0, .34), 0 2px 6px rgba(0, 0, 0, .3), 0 0 0 1px rgba(120, 190, 255, .07); }
-.nc.drop.hov { --sc: 1.035; }
 .nc.drop.hot { cursor: pointer; }
 .nc.drop.full.hot { cursor: default; }
 /* Drop: the name on the left glow, the globe in the middle like a camera lens, the status on the right glow. */
@@ -68,14 +68,14 @@
 /* The pill never changes shape: the reply and Allow prompts open in their own card. Closed, the card is the pill's
    size, tucked under it; it slides down out of the pill as it widens and grows, and goes back up the same way. The
    text keeps its final width, so it doesn't re-wrap while the card grows. */
-.nc.drop .nc-body { top: calc(var(--row) + 8px); left: 50%; right: auto; width: var(--w); padding: 14px 20px 16px;
+.nc.drop .nc-body { --cw: var(--w); top: 0; left: calc(50% - var(--cw) / 2); right: auto; width: var(--cw); padding: 14px 20px 16px;
   height: var(--row); overflow: hidden; box-sizing: border-box; opacity: 0;
   background: #000; border-radius: 22px; pointer-events: none;
   box-shadow: 0 14px 36px rgba(0, 0, 0, .34), 0 2px 6px rgba(0, 0, 0, .3), 0 0 0 1px rgba(120, 190, 255, .07), inset 0 1px 0 rgba(255, 255, 255, .06);
-  transform: translateX(-50%) translateY(calc(-8px - var(--row))); transform-origin: 50% 0;
-  transition: opacity .12s ease .2s, width .32s cubic-bezier(.4, 0, .2, 1), height .3s cubic-bezier(.4, 0, .2, 1), transform .32s cubic-bezier(.4, 0, .2, 1); }
-.nc.drop.full .nc-body { width: var(--bw, 440px); height: var(--bh, auto); transform: translateX(-50%); opacity: 1; pointer-events: auto;
-  transition: opacity .1s ease, width .44s cubic-bezier(.22, 1, .36, 1), height .4s cubic-bezier(.22, 1, .36, 1), transform .52s cubic-bezier(.3, 1.25, .5, 1); }
+  transition: opacity .12s ease .2s, --cw .32s cubic-bezier(.4, 0, .2, 1), height .3s cubic-bezier(.4, 0, .2, 1), top .32s cubic-bezier(.4, 0, .2, 1); }
+.nc.drop.full .nc-body { --cw: var(--bw, 440px); top: calc(var(--row) + 8px); height: var(--bh, auto); opacity: 1; pointer-events: auto;
+  transition: opacity .1s ease, --cw .44s cubic-bezier(.22, 1, .36, 1), height .4s cubic-bezier(.22, 1, .36, 1), top .52s cubic-bezier(.3, 1.25, .5, 1); }
+@property --cw { syntax: '<length>'; inherits: false; initial-value: 0px; }
 .nc.drop .nc-text { width: calc(var(--bw, 440px) - 40px); }
 /* The pill (its black, glow and contents) stays above the card while it slides out from under it. */
 .nc.drop .nc-skin, .nc.drop .nc-row { z-index: 1; }
@@ -273,7 +273,7 @@
     if (drop()) return applyDrop(s);
     el.style.setProperty('--y', '0px');
     const n = notch(), row = Math.max(n.h, 34);
-    el.style.left = `${n.x + n.w / 2}px`;
+    el.style.left = `calc(${n.x + n.w / 2}px - var(--w) / 2)`;
     el.style.setProperty('--row', `${row}px`);
     // Both wings as wide as the status needs (the capsule stays centred on the notch), within reason.
     // Left wing: globe and name; right wing: the status. Both as wide as the wider one, so it stays centred.
@@ -302,7 +302,7 @@
   // Drop: at rest a pill hidden inside the notch (or above the top edge); out, a pill floating GAP below it.
   const applyDrop = (s) => {
     const n = notch(), row = DROP_ROW;
-    el.style.left = `${n.x + n.w / 2}px`;
+    el.style.left = `calc(${n.x + n.w / 2}px - var(--w) / 2)`;
     el.style.setProperty('--row', `${row}px`);
     el.style.setProperty('--f', '0px');
     const statusW = st.statusW ?? $('.nc-status').scrollWidth;
@@ -589,15 +589,34 @@
     st.liq = { dir, t0: performance.now(), dropped: false };
     el.classList.add('liquid');
     goo.style.display = 'block';
-    // Squash and stretch on the capsule itself (the individual scale property, so it adds to the transform).
-    el.getAnimations?.().filter((a) => a.id === 'nc-jelly').forEach((a) => a.cancel());
-    const kf = dir === 'out'
-      // Out: it stretches as it pulls away, pinches off, and the release bounces it wide, then settles.
-      ? [{ scale: '.5 .6' }, { scale: '.9 1.14', offset: 0.4 }, { scale: '1.06 .9', offset: 0.62 }, { scale: '.985 1.02', offset: 0.82 }, { scale: '1 1' }]
-      // In: it squashes, stretches up toward the notch as the neck takes it, and is drawn in.
-      : [{ scale: '1 1' }, { scale: '1.05 .9', offset: 0.2 }, { scale: '.86 1.14', offset: 0.58 }, { scale: '.5 .6' }];
-    const a = el.animate?.(kf, { duration: dir === 'out' ? OUT_MS : IN_MS, easing: 'cubic-bezier(.33, .1, .3, 1)', fill: 'none' });
-    if (a) a.id = 'nc-jelly';
+    // Squash and stretch on the capsule itself, stepped by the frame loop (jellyStep).
+    st.jelly = { kf: dir === 'out' ? JELLY_OUT : JELLY_IN, t0: st.liq.t0, ms: dir === 'out' ? OUT_MS : IN_MS };
+  };
+  // [time, x, y]. Out: it stretches as it pulls away, pinches off, and the release bounces it wide, then settles.
+  // In: it squashes, stretches up toward the notch as the neck takes it, and is drawn in.
+  const JELLY_OUT = [[0, 0.5, 0.6], [0.4, 0.9, 1.14], [0.62, 1.06, 0.9], [0.82, 0.985, 1.02], [1, 1, 1]];
+  const JELLY_IN = [[0, 1, 1], [0.2, 1.05, 0.9], [0.58, 0.86, 1.14], [1, 0.5, 0.6]];
+  // cubic-bezier(.33, .1, .3, 1), the jelly's easing.
+  const ease = (t) => {
+    let u = t;
+    for (let i = 0; i < 6; i++) { const x = 3 * 0.33 * u * (1 - u) ** 2 + 3 * 0.3 * u * u * (1 - u) + u ** 3 - t, d = 3 * 0.33 * (1 - u) ** 2 + 6 * (0.3 - 0.33) * u * (1 - u) + 3 * (1 - 0.3) * u * u; if (Math.abs(d) < 1e-6) break; u = clamp(u - x / d, 0, 1); }
+    return 3 * 0.1 * u * (1 - u) ** 2 + 3 * u * u * (1 - u) + u ** 3;
+  };
+  // The capsule's scale this frame: the jelly while it pours, times a slight swell while the cursor is on it.
+  const jellyStep = (now) => {
+    let sx = 1, sy = 1;
+    const j = st.jelly;
+    if (j) {
+      const t = ease(clamp((now - j.t0) / j.ms, 0, 1));
+      let k = 1;
+      while (k < j.kf.length - 1 && j.kf[k][0] < t) k++;
+      const [ta, xa, ya] = j.kf[k - 1], [tb, xb, yb] = j.kf[k], f = tb > ta ? clamp((t - ta) / (tb - ta), 0, 1) : 1;
+      sx = xa + (xb - xa) * f; sy = ya + (yb - ya) * f;
+      if (now - j.t0 >= j.ms) st.jelly = null;
+    }
+    st.hs = (st.hs ?? 1) + ((el.classList.contains('hov') ? 1.035 : 1) - (st.hs ?? 1)) * 0.25;
+    if (Math.abs(st.hs - 1) < 0.001) st.hs = 1;
+    el.style.scale = sx === 1 && sy === 1 && st.hs === 1 ? '' : `${(sx * st.hs).toFixed(4)} ${(sy * st.hs).toFixed(4)}`;
   };
   const liquidStep = (now) => {
     const q = st.liq;
@@ -609,7 +628,8 @@
     goo.style.left = `${ox}px`;
     // The notch blob stays the notch (black on black), or a lip above the top edge on screens without one.
     const top = n.real ? 0 : -24, base = n.real ? n.h : 0, nw = n.real ? n.w : 120;
-    place(gNotch, { left: `${cx - nw / 2 - ox}px`, top: `${top}px`, width: `${nw}px`, height: `${base - top}px` });
+    // Inset: the blur's threshold grows a shape by a few px, and nothing may show around the real notch.
+    place(gNotch, { left: `${cx - nw / 2 + 4 - ox}px`, top: `${top}px`, width: `${nw - 8}px`, height: `${base - top - 4}px` });
     // The tongue: a stream from the middle of the notch. Out: it holds on to the top of the pill as it falls, then
     // thins and pulls back up, and the stream splits. In: it reaches down, takes hold, and the pill rises up it.
     const reach = r.top + r.height * 0.4;
@@ -640,14 +660,16 @@
     if (q.dir === 'out' && u >= 0.64) { st.liq = null; goo.style.display = 'none'; refit(); return; }
     if (u >= 1) {
       if (q.dir === 'out') { st.liq = null; el.classList.remove('liquid'); goo.style.display = 'none'; refit(); }
-      else place(gPill, { width: '0px' });
+      else { st.liq = null; goo.style.display = 'none'; }
     }
   };
 
   // Drop: the lens looks at the cursor. The pill itself stays put under the notch.
   const dropStep = () => {
+    const now = performance.now();
+    jellyStep(now);
     const r = el.getBoundingClientRect();
-    liquidStep(performance.now());
+    liquidStep(now);
     let look = [0, 0];
     if (st.open && !st.liq && st.px != null) {
       const cx = r.left + r.width / 2, cy = r.top + r.height / 2, dx = st.px - cx, dy = st.py - cy, dist = Math.hypot(dx, dy);
