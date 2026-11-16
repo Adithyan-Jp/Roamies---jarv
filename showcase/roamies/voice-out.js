@@ -78,6 +78,13 @@
       const v = Math.min(1, Math.sqrt(sum / buf.length) * 4);
       return (lv += (v - lv) * (v > lv ? 0.5 : 0.15));
     },
+    // The voice itself as it plays: the analyser's latest window of samples (-1..1), or null when silent. Shared
+    // buffer, read it before the next call. For drawing a true waveform of what's being said (notch.js).
+    samples() {
+      if (!this.playing()) return null;
+      meter.getFloatTimeDomainData(buf);
+      return buf;
+    },
     stop,
   };
 })();

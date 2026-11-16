@@ -16,7 +16,11 @@
   R.unit = (env) => env.unit ?? Math.min(env.w, env.h);
   // Screen edges covered by the menu bar / Dock / taskbar, in CSS px. The desktop host keeps it current.
   R.safe = { top: 0, right: 0, bottom: 0, left: 0 };
-  R.setSafe = (s) => { for (const k of ['top', 'right', 'bottom', 'left']) R.safe[k] = Math.max(0, +s?.[k] || 0); R.origin = { x: +s?.ox || 0, y: +s?.oy || 0 }; };
+  R.setSafe = (s) => { for (const k of ['top', 'right', 'bottom', 'left']) R.safe[k] = Math.max(0, +s?.[k] || 0); R.origin = { x: +s?.ox || 0, y: +s?.oy || 0 };
+    // The notch capsule keeps its own space at the top while it's open (notch.js): cards and drawings land below it.
+    R.safeTop0 = R.safe.top; R.safe.top = Math.max(R.safe.top, R.notchReserve || 0);
+    // The camera notch on this screen (macOS, main.rs safe_js), for the notch capsule (notch.js), or null.
+    const n = s?.notch; R.safe.notch = n && +n.w > 0 ? { x: +n.x || 0, w: +n.w, h: +n.h || 32 } : null; };
   R.origin = { x: 0, y: 0 };
 
   // Damped 1D spring, used for squash/pop.
@@ -576,11 +580,11 @@
         if (!pointer.active || nowMs - pointer.last > 250) setPointer(x, y);
         pointer.active = true; pointer.last = nowMs;
       } else if (x !== pointer.x || y !== pointer.y) setPointer(x, y);
-      return !!down || list.some((o) => o.c.mover.dragging || o.c.hit?.(x, y)) || !!hitAt(x, y) || !!R.panelHit?.(x, y) || !!R.askBarHit?.(x, y) || !!R.homeHit?.(x, y) || !!R.inkHit?.(x, y);
+      return !!down || list.some((o) => o.c.mover.dragging || o.c.hit?.(x, y)) || !!hitAt(x, y) || !!R.panelHit?.(x, y) || !!R.askBarHit?.(x, y) || !!R.homeHit?.(x, y) || !!R.inkHit?.(x, y) || !!R.notchHit?.(x, y);
     };
     // Linux hosts shape the window's click area from these instead of following the cursor (host.js): ptr's answer
     // for a point without moving the pointer, and the patch of screen the canvas covers now (null: nothing drawn).
-    R.hitTest = (x, y) => list.some((o) => o.c.hit?.(x, y)) || !!hitAt(x, y) || !!R.panelHit?.(x, y) || !!R.askBarHit?.(x, y) || !!R.homeHit?.(x, y) || !!R.inkHit?.(x, y);
+    R.hitTest = (x, y) => list.some((o) => o.c.hit?.(x, y)) || !!hitAt(x, y) || !!R.panelHit?.(x, y) || !!R.askBarHit?.(x, y) || !!R.homeHit?.(x, y) || !!R.inkHit?.(x, y) || !!R.notchHit?.(x, y, false);
     R.hitBox = () => (cw && ch ? [vx, vy, cw, ch] : null);
     // On the window, not the canvas: the canvas is only as big as what's drawn, and hit areas can reach past it.
     // Clicks on other page elements (the research card) are theirs.

@@ -94,12 +94,15 @@
   const finishAsk = (text) => {
     if (!ask) return;
     const { id, h, label } = ask;
+    const ask0 = ask;
     ask = null;
     if (label != null) field.setAttribute('aria-label', label);
     field.blur(); field.value = '';
     typing(false);
     h.close();
     if (id) send({ type: 'answer', id, text });
+    // A typed request: the capsule comes out now, not when the brain gets round to starting the turn.
+    if (id && text && ask0?.bar && notchOn()) N().begin();
   };
   const openAsk = (m) => {
     const a = getAgent();
@@ -122,7 +125,9 @@
     const question = m.prompt || m.placeholder || '';
     // A yes/no: Allow answers yes, any other button no. The field only takes keys then (Y, N, Tab, arrows, Enter).
     const choices = Array.isArray(m.choices) && m.choices.length ? m.choices.map(String) : null;
-    const h = a.prompt({ placeholder: question, mask: m.mask, onPress: focusField, choices, onChoose: (i) => finishAsk(i === 0 ? 'yes' : null) });
+    const h = capR() && choices && !m.mask
+      ? N().prompt(question, choices, (i) => finishAsk(i === 0 ? 'yes' : null))
+      : a.prompt({ placeholder: question, mask: m.mask, onPress: focusField, choices, onChoose: (i) => finishAsk(i === 0 ? 'yes' : null) });
     ask = { id: m.id, h, choices, sel: -1, label: null };
     if (choices) { ask.label = field.getAttribute('aria-label'); field.setAttribute('aria-label', `${question} Press Y to allow or N to decline.`); }
     focusField();
@@ -173,6 +178,17 @@
   const jobs = [];
   let current = null;
   const MOODS = { hype: 'happy', wave: 'happy', upset: 'annoyed', remind: 'concerned', motivate: 'determined' };
+  // Notch mode (notch.js): the turn plays in the capsule at the notch instead of beside the cursor.
+  const notchOn = () => !!Roamie.notch?.enabled;
+  // One place per setting: in notch mode everything (state and replies) is in the capsule.
+  const capR = notchOn;
+  const N = () => Roamie.notch;
+  if (Roamie.notch) Roamie.notch._busy = () => responding;
+  const toolWords = (anim) => {
+    if (anim.tool === 'web') return webStatus(anim);
+    const w = [anim.label, anim.detail].filter(Boolean).join(' ');
+    return w ? w[0].toUpperCase() + w.slice(1) : 'Working';
+  };
   const endTalk = () => { speech?.end(); thought?.end(); speech = thought = null; };
   // Auto-listen: a spoken question answered with a question. Once the bubble has typed it out and the voice has said
   // it, and a short pause, the mic opens hands-free. Anything the user does first drops it.
@@ -222,7 +238,7 @@
       current = null;
     }
     // Every queued tool has finished but the turn is still going: keep a quiet thinking tag up until the next thing.
-    if (responding && !speech && !thought && !listen?.open && !research && !agentish && !Roamie.ink?.playing) {
+    if (responding && !notchOn() && !speech && !thought && !listen?.open && !research && !agentish && !Roamie.ink?.playing) {
       thought = getAgent()?.think('', { stream: true, quiet: true }) ?? null;
     }
   }
@@ -239,6 +255,8 @@
   const PASS = new Set(['draw', 'ink_clear', 'ink_stale', 'start', 'error', 'tool_target', 'tool_image']);
   function onAgent(e) {
     if (e.type === 'start' || e.type === 'error') flushDeferred();
+    // Notch mode: the words and the end of the turn go to the capsule, never held behind a drawing.
+    if (capR() && (e.type === 'text' || e.type === 'done') && !deferred) { agentEvent(e); return; }
     if (deferred && !PASS.has(e.type)) { deferred.push(e); return; }
     if (!PASS.has(e.type) && ['text', 'done', 'emote', 'trail'].includes(e.type) && Roamie.ink?.playing) {
       deferred = [e];
@@ -268,9 +286,11 @@
         if (agentish) {
           const p = a.visible ? [a.pos.x, a.pos.y - a.pos.r - 28] : cursor ? [cursor[0] + 30, cursor[1] + 26] : [innerWidth / 2, innerHeight / 3];
           Roamie.agentHome?.hatch(p);
-        } else if (!listen?.open && !waveTurn) thought = a.think('', { stream: true });
+        } else if (notchOn()) N().begin();
+        else if (!listen?.open && !waveTurn) thought = a.think('', { stream: true });
         break;
       case 'thinking':
+        if (notchOn()) { if (!research && !agentish) N().think(e.text); break; }
         if (speech || listen?.open || research || agentish || (waveTurn && !a.visible)) break;
         if (!thought) thought = a.think('', { stream: true, quiet: true });
         thought.append(e.text);
@@ -280,6 +300,20 @@
         if (research) {
           if (research === 'looking') { research = 'writing'; panel()?.status('Writing it up'); }
           panel()?.append(e.text);
+          break;
+        }
+        if (capR()) {
+          // An answer that turns into points moves to the card, as it does from the bubble.
+          if (LISTY.test(spoken + e.text)) {
+            const so = (spoken + e.text).replace(/^\s+/, '');
+            spoken = ''; research = 'writing';
+            N().reset(); N().tool('Writing it up');
+            panel()?.open({ status: 'Writing it up', near: near() }).append(so);
+            break;
+          }
+          nextMood = null;
+          spoken += e.text;
+          N().text(e.text);
           break;
         }
         if (speech && LISTY.test(spoken + e.text)) {
@@ -308,6 +342,11 @@
         if (listen?.open) break;
         // Tools with nothing to show (listing commitments) don't interrupt the bubble.
         if (!e.anim) break;
+        if (notchOn()) {
+          if (e.anim.tool === 'web') { fromWeb = true; if (research) { research = 'looking'; panel()?.status(webStatus(e.anim)); break; } }
+          N().tool(toolWords(e.anim));
+          break;
+        }
         endTalk();
         // The web: just the task tag ("searching the web"), and the answer is said in the bubble. The card is for an
         // answer that breaks down into points (LISTY), not every lookup; one already open this turn says what it checks.
@@ -323,6 +362,7 @@
       // A drawing's next segment (beats with their places already on screen), or clearing what's drawn.
       case 'draw':
         endTalk();
+        if (notchOn()) N().yieldTo('Showing you');
         Roamie.ink?.play(e);
         break;
       case 'ink_clear': Roamie.ink?.clear(e); break;
@@ -350,7 +390,7 @@
       case 'trail': a.cards?.trail(e); break;
       case 'emote':
         nextMood = MOODS[e.action] ?? null;
-        a.act(e.action);
+        if (!capR()) a.act(e.action);
         break;
       case 'done':
         responding = false;
@@ -359,6 +399,7 @@
         if (research) panel()?.end(fromWeb ? 'From the web' : 'Answer');
         research = waveTurn = false;
         endTalk();
+        if (notchOn()) N().done({ speech: e.speech });
         if (e.listen) waitThenListen(e.listen);
         reportSaid(e.speech);
         break;
@@ -372,7 +413,9 @@
         endTalk();
         reportSaid(e.speech);
         for (const j of [current, ...jobs]) if (j && j.result === undefined) settle(j.id, true);
-        a.say(e.message, { mood: 'concerned' });
+        if (capR()) N().fail(e.message);
+        else if (notchOn()) N().close();
+        else a.say(e.message, { mood: 'concerned' });
         break;
     }
   }
@@ -391,6 +434,15 @@
       endTalk();
       heard = null;
       panel()?.close();
+      // Notch mode: the capsule listens (the cursor pill is switched off then, voice/wave.swift).
+      if (notchOn()) {
+        waveTurn = false;
+        thought?.end(); thought = null;
+        if (a.visible) a.hide();
+        N().listen();
+        Roamie.sfx?.play('listen');
+        return;
+      }
       // macOS: the listening shows as voice bars beside the cursor, so the sidekick steps away until it answers.
       if (m.wave) {
         waveTurn = true;
@@ -400,17 +452,20 @@
         return;
       }
       listen = a.listen({ placeholder: m.mode === 'handsfree' ? 'Listening… tap again to send' : 'Listening…' });
-    } else if (m.type === 'partial') listen?.set(m.text);
-    else if (m.type === 'level') listen?.level(m.v);
+    } else if (m.type === 'partial') { listen?.set(m.text); if (notchOn()) N().heard(m.text); }
+    else if (m.type === 'level') { listen?.level(m.v); if (notchOn()) N().level(m.v); }
     else if (m.type === 'state' && m.state === 'processing') listen?.processing();
     else if (m.type === 'final') {
       heardText = true;
+      if (notchOn()) { N().heard(m.text); N().think(); }
       // Keep what was heard on screen until the agent starts thinking.
       if (listen) { listen.set(m.text).processing(); heard = listen; listen = null; }
       Roamie.sfx?.play('heard');
     } else if (m.type === 'state' && m.state === 'idle') {
       // Nothing was heard (or it was cancelled): no answer is coming for that talk.
-      if (m.cancelled || !heardText) waveTurn = false;
+      if (m.cancelled || !heardText) { waveTurn = false; if (notchOn() && !responding) N().close(); }
+      // Heard, but no turn ever started (or it never ended): don't leave 'Thinking' up for good.
+      else if (notchOn()) setTimeout(() => { if (!responding && Roamie.notch?.active) N().close(); }, 20000);
       heardText = false;
       listen?.close(); listen = null;
       if (heard) { const h = heard; setTimeout(() => { if (heard === h) { h.close(); heard = null; } }, 4000); }
@@ -432,6 +487,7 @@
     if (ask) finishAsk(null);
     endTalk(); listen?.close(); listen = null;
     if (a?.visible) a.hide({ instant: true });
+    Roamie.notch?.close();
     if (held) return;
     held = { q: [], t: setTimeout(flush, 300) };
     addEventListener('resize', () => requestAnimationFrame(() => requestAnimationFrame(flush)), { once: true });
@@ -441,11 +497,13 @@
     Roamie.wake?.(); // the frame loop naps while the sidekick is hidden
     if (m.kind === 'speech') { Roamie.voiceOut?.handle(m); return; } // plays on, even while it changes screens
     if (held) { held.q.push(m); return; }
+    if (m.kind === 'notch') { if (Roamie.notch) { Roamie.notch.enabled = !!m.on; if (m.style) Roamie.notch.style = m.style; if (!m.on) Roamie.notch.close(); } return; }
     if (m.kind === 'sound') { if (Roamie.sfx) Roamie.sfx.enabled = m.on; return; }
     if (m.kind === 'size') { for (const t of Roamie.tiles ?? []) t.creature.setForm?.(m.size); return; }
     if (m.kind === 'look') {
       for (const t of Roamie.tiles ?? []) t.creature.setLook?.(m.look);
       field.setAttribute('aria-label', `Message for ${NAMES[m.look] ?? NAMES.classic}`);
+      if (Roamie.notch) { Roamie.notch.name = NAMES[m.look] ?? NAMES.classic; Roamie.notch.look = m.look; }
       return;
     }
     if (!getAgent()) return;
@@ -468,7 +526,7 @@
       return;
     }
     if (m.kind === 'greet') { getAgent().act('wave'); return; }
-    if (m.kind === 'intro') { getAgent().intro(m.x, m.text); return; }
+    if (m.kind === 'intro') { if (capR()) N().say(m.text); else getAgent().intro(m.x, m.text); return; }
     if (m.kind === 'esc') { onEsc(); return; }
     if (m.kind === 'summon') {
       // ⌃⌥S toggles; the menu's Show Sidekick only ever shows.
@@ -477,7 +535,7 @@
       else a.hide();
       return;
     }
-    if (m.kind === 'say') { if (!ask || ask.bar) getAgent().say(m.text, { mood: m.mood ?? null }); } // the field leaves the bubble free
+    if (m.kind === 'say') { if (!ask || ask.bar) { if (capR()) N().say(m.text); else getAgent().say(m.text, { mood: m.mood ?? null }); } } // the field leaves the bubble free
     else if (m.kind === 'ask') openAsk(m);
     else if (m.kind === 'cancel_ask') { if (ask?.id === m.id) { ask.id = null; finishAsk(null); } }
     else if (m.kind === 'agent') onAgent(m.e);
@@ -493,7 +551,7 @@
   // way out once the Roamie has gone). Cards left on screen have their own close button and don't hold Esc. The
   // reminders card does while it shows (it goes by itself in a few seconds).
   // A voice turn counts too: on macOS the sidekick steps away while the mic is on and until the answer shows.
-  const up = () => !!(getAgent()?.visible || ask || Roamie.panel?.isOpen || Roamie.ink?.playing || Roamie.ink?.loose || Roamie.ink?.reminding || hearing || waveTurn || Roamie.voiceOut?.playing());
+  const up = () => !!(getAgent()?.visible || Roamie.notch?.active || ask || Roamie.panel?.isOpen || Roamie.ink?.playing || Roamie.ink?.loose || Roamie.ink?.reminding || hearing || waveTurn || Roamie.voiceOut?.playing());
   function onEsc() {
     dropAutoListen();
     const a = getAgent();
@@ -505,6 +563,7 @@
     if (Roamie.ink?.busy) { Roamie.ink.clear({ all: true }); send({ type: 'ink_cleared' }); return; }
     if (Roamie.panel?.isOpen) Roamie.panel.close();
     endTalk(); listen?.close(); listen = null;
+    Roamie.notch?.close();
     if (a.visible) a.hide();
   }
   let escUp = null;

@@ -106,7 +106,11 @@ final class Wave {
         return p
     }
 
+    /// Off while the notch capsule shows the listening instead (the page draws it there, not beside the cursor).
+    var off = false
+
     func show() {
+        if off { hide(); return }
         thinking = false; level = 0; target = 0
         rebuildIfScreensChanged()
         if !shown {
@@ -119,10 +123,14 @@ final class Wave {
     }
 
     /// Let go: the words are being worked out, then the answer is on its way.
-    func think() { if shown { thinking = true } }
+    func think() {
+        if off { hide(); return }
+        if shown { thinking = true }
+    }
 
     /// The words went off: keep the dots until the sidekick's answer appears (handoff).
     func awaitAnswer() {
+        if off { hide(); return }
         guard shown else { return }
         waitID += 1
         let id = waitID
