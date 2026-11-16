@@ -26,7 +26,7 @@
       meter = ac.createAnalyser(); meter.fftSize = 512; buf = new Float32Array(meter.fftSize);
       out.connect(meter); meter.connect(ac.destination);
     }
-    if (ac.state !== 'running') ac.resume();
+    if (ac.state !== 'running') ac.resume().catch(() => {});
     return ac;
   };
 
@@ -53,7 +53,8 @@
     const b = pcm(m.pcm, m.rate || 44100), s = a.createBufferSource();
     s.buffer = b; s.connect(out);
     const now = a.currentTime;
-    if (!live.length) { out.gain.cancelScheduledValues(now); out.gain.setValueAtTime(1, now); }
+    // A new reply fades in over 30 ms (a replaced reply's tail never plays at full level).
+    if (!live.length) { out.gain.cancelScheduledValues(now); out.gain.setValueAtTime(0, now); out.gain.linearRampToValueAtTime(1, now + 0.03); }
     const gap = endAt ? now - endAt : 0; // > 0: what was queued has already played out
     let cushion = LEAD;
     if (ADAPT && gap > 0 && gap < JITTER) { late = true; lead = Math.min(MAX_LEAD, lead * 2); cushion = lead; }
@@ -73,7 +74,7 @@
       }
       if (m.pcm) play(m);
     },
-    playing: () => !!ac && live.length > 0 && ac.currentTime < endAt + 0.05,
+    playing: () => !!ac && ac.state === 'running' && live.length > 0 && ac.currentTime < endAt + 0.05,
     cps: () => rate,
     lead: () => lead,
     // That reply has nothing left to play: its end arrived (or it was stopped), and nothing is still sounding.
@@ -88,5 +89,8 @@
       return (lv += (v - lv) * (v > lv ? 0.5 : 0.15));
     },
     stop,
+    // Make the audio context ahead of the first reply (host.js calls it when a request starts), so the first
+    // chunk doesn't pay for creating it.
+    warm() { try { ctx(); } catch { /* no audio */ } },
   };
 })();
