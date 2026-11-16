@@ -162,7 +162,7 @@
   // waveTurn: a spoken question whose "thinking" shows as dots beside the cursor (macOS), so the Sidekick
   // shows no thought cloud of its own. research: this turn's answer broke down into points, so it goes on the card.
   let hearing = false; // a voice take is open (the mic is on), so Esc can cancel it
-  let waveTurn = false, research = false, heardText = false, spoken = '', fromWeb = false;
+  let waveTurn = false, research = false, heardText = false, spoken = '', fromWeb = false, listenTake = 0;
   // agentish: they asked for an agent, so the agents' corner hatches one instead of the thought cloud.
   let agentish = false;
   // An answer that turns into points (or cites sources) reads better on the card than in a bubble.
@@ -435,6 +435,7 @@
       endTalk();
       heard = null;
       panel()?.close();
+      listenTake++;
       // Notch mode: the capsule listens (the cursor pill is switched off then, voice/wave.swift).
       if (notchOn()) {
         waveTurn = false;
@@ -466,7 +467,8 @@
       // Nothing was heard (or it was cancelled): no answer is coming for that talk.
       if (m.cancelled || !heardText) { waveTurn = false; if (notchOn() && !responding) N().close(); }
       // Heard, but no turn ever started (or it never ended): don't leave 'Thinking' up for good.
-      else if (notchOn()) setTimeout(() => { if (!responding && Roamie.notch?.active) N().close(); }, 20000);
+      // Only for this take: a newer one (talking again within the 20 s) keeps its capsule.
+      else if (notchOn()) { const take = listenTake; setTimeout(() => { if (take === listenTake && !responding && Roamie.notch?.active) N().close(); }, 20000); }
       heardText = false;
       listen?.close(); listen = null;
       if (heard) { const h = heard; setTimeout(() => { if (heard === h) { h.close(); heard = null; } }, 4000); }

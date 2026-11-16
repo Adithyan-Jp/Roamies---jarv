@@ -74,4 +74,12 @@ card.style.set.length = 0;
 R.notch.say("I heard you, but didn't catch any words.");
 frames();
 assert.ok(card.style.set.some(([k]) => k === '--bh'), 'the card is sized for the line');
+// Talking again while the last turn is still finishing: that turn's end (or error) arrives once the mic is on, and the
+// capsule keeps listening instead of closing.
+R.notch.close(); flush(); frames();
+R.notch.listen();
+R.notch.done();
+assert.equal(R.notch.active, true, 'the cut-short turn ending leaves it listening');
+R.notch.fail('stopped');
+assert.equal(capsule.dataset.mode, 'listen', 'an error from it does too');
 console.log('notch tests: passed');

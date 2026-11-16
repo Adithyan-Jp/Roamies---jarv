@@ -779,6 +779,8 @@
       render(); show();
     },
     done({ speech } = {}) {
+      // A turn cut short by talking again ends while the mic is already on: the capsule stays listening.
+      if (st.mode === 'listen' && st.open) return;
       st.speech = speech ?? null;
       if (!st.text && !st.prompt) { close(); return; }
       if (!st.prompt && !st.folded && st.mode !== 'talk' && st.mode !== 'error') setMode('done', '');
@@ -786,6 +788,7 @@
       linger();
     },
     fail(message) {
+      if (st.mode === 'listen' && st.open) return;
       if (closing()) fresh();
       st.text = String(message ?? 'Something went wrong.'); st.speech = null;
       setMode('error', 'Couldn’t finish'); render(); show(); linger(); announce(st.text);

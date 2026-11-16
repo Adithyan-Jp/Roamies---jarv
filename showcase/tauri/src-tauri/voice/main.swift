@@ -1350,7 +1350,7 @@ Thread.detachNewThread {
         case "cancel": DispatchQueue.main.async { voice.externalCancel() }
         case "listen": let wait = msg["wait"] as? Double; DispatchQueue.main.async { voice.listenNow(wait: wait) }
         // The sidekick is answering (it appears where the cursor is): the listening pill can go.
-        case "handoff": DispatchQueue.main.async { voice.wave.hide() }
+        case "handoff": DispatchQueue.main.async { voice.wave.handoff() }
         // The sidekick following the cursor in its cursor form, drawn here (buddy.swift) until the page takes it back.
         case "buddy": DispatchQueue.main.async { if msg["on"] as? Bool == true { voice.buddy.show(msg) } else { voice.buddy.hide() } }
         case "buddy_alpha": if let a = msg["a"] as? Double { DispatchQueue.main.async { voice.buddy.setHidden(a < 0.5) } }

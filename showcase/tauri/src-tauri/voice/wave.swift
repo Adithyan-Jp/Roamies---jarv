@@ -138,6 +138,13 @@ final class Wave {
         DispatchQueue.main.asyncAfter(deadline: .now() + 90) { [weak self] in if self?.waitID == id { self?.hide() } }
     }
 
+    /// The answer is showing: the dots go. Not while it's still listening (thinking is false until they let go): a turn
+    /// cut short by talking again ends right after the mic opens, and its answer mustn't take the bars away.
+    func handoff() {
+        guard shown, thinking else { return }
+        hide()
+    }
+
     func hide() {
         guard shown else { return }
         shown = false
