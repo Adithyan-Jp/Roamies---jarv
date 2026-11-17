@@ -534,7 +534,9 @@ export function createAgents({ fork, ui, config, root, userName = 'The user', ru
         model: z.string().max(80).optional(),
       }),
       execute: async (args) => {
-        const a = await start(args);
+        let a;
+        try { a = await start(args); }
+        catch (e) { throw new Error(`${e.message} The launch failed, so there is no agent: say so right away in one short sentence and what you will do instead (do it yourself if you can), and never go quiet.`); }
         if (a.sub) return `Started ${a.subLabel} as ${a.id} "${a.title}" in ${a.dir}, on its own model. It shows in the corner of the screen. If another part of the request needs another subagent, start it now with its own complete prompt; otherwise write nothing more: the launch is your reply.`;
         return `Started ${a.id} "${a.title}" (${a.type}, returns ${a.returns}) in ${a.dir}. It shows in the corner of the screen. Write nothing more and call no other tools: the launch is your reply.`;
       },

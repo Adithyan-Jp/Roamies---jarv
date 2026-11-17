@@ -19,7 +19,7 @@ import { execFile, execFileSync, fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
@@ -854,10 +854,20 @@ let credsAccountId;
 const requestBudget = () => Math.min(config.lite ? LITE_BUDGET : BUDGET_CAP, getContextWindow(config.model, { provider: config.provider, ...(agentRoute === 'api' && credsAccountId ? { accountId: credsAccountId } : {}) }) * 0.5);
 // Claude Code's session for this conversation, so a rebuilt agent continues it instead of starting over.
 let ccResume = null;
+// The app pins one Claude Code version; after an update the one downloaded earlier is still on disk and still signed in
+// (the login lives in its config folder, not in the binary), so use it instead of calling the install missing.
+function installedClaudeCode() {
+  try {
+    const home = path.join(HOME, '.gg', 'claude-code'), bin = process.platform === 'win32' ? 'claude.exe' : 'claude';
+    const vs = readdirSync(home).filter((v) => /^\d+(\.\d+)*$/.test(v)).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+    for (const v of vs) { const f = path.join(home, v, bin); if (existsSync(f)) return f; }
+  } catch { /* none */ }
+  return null;
+}
 // The Claude Code process when Anthropic is signed in with Claude (else null: the API, with a key or another provider).
 async function claudeCodeRoute(provider = config.provider) {
   if (provider !== 'anthropic' || !(await auth.hasClaudeCodeLogin().catch(() => false))) return null;
-  const executable = resolveClaudeCodeBinary();
+  const executable = resolveClaudeCodeBinary() ?? installedClaudeCode();
   if (!executable) throw new Error(`Claude Code isn't installed anymore. Sign in with Claude again on the Model page in ${PANEL}.`);
   return { executable, env: claudeCodeEnv() };
 }
@@ -875,10 +885,19 @@ async function agentModel(override) {
   const gp = given ? parseSpec(given.spec) : null;
   // Their own words win: a model they named this turn beats the one picked for the specialist.
   const want = named ? pickOf(named.provider, named.model, null) : turnNamed ?? (gp ? pickOf(gp.provider, gp.model, given.slot) : null) ?? (h ? pickOf(h.provider, h.model, 'agents') : null);
-  const { pick } = firstFree([want, ...chainOrder()], limits);
-  const use = pick ?? defaultSpecPick(), slot = want && use.spec === want.spec ? (want.slot ?? slotOf(want.spec)) : use.slot;
+  // The first model in line that can actually start: one whose route fails (Claude Code missing, say) is skipped, so a
+  // background agent still starts on the next model instead of failing the launch.
+  const order = [want, ...chainOrder()];
+  let use = null, slot = null, cc = null, failure = null;
+  for (let tries = 0; tries < 4 && !use; tries++) {
+    const { pick } = firstFree(order, limits), cand = pick ?? (tries === 0 || !failure ? defaultSpecPick() : null);
+    if (!cand) break;
+    const sl = want && cand.spec === want.spec ? (want.slot ?? slotOf(want.spec)) : cand.slot;
+    try { cc = await claudeCodeRoute(cand.provider); use = cand; slot = sl; }
+    catch (e) { failure = e; logLine('agent_route', { spec: cand.spec, error: String(e.message) }); const i = order.findIndex((p) => p?.spec === cand.spec); if (i >= 0) order.splice(i, 1); else break; }
+  }
+  if (!use) throw failure ?? new Error(`No AI model is ready for an agent. Tell ${userName} to check the Model page in ${PANEL}.`);
   const provider = use.provider, model = use.model;
-  const cc = await claudeCodeRoute(provider);
   const m = getModel(model), c = cc ? {} : await credsFor(provider, model).catch(() => ({}));
   return {
     provider, model, route: cc ? 'claude-code' : 'api', cc: cc ?? undefined,
