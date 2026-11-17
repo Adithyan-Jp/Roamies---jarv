@@ -630,6 +630,10 @@
       el('div', { className: 'ghead' }, el('h2', { textContent: 'Subagents' }),
         el('p', { className: 'wrap', textContent: 'Specialists I can hand background work to, each on the model you pick. I write each one its own prompt from your words.' })),
       toggle('Use subagents', 'I can start up to three at once for separate parts of a request. They work in the background and report back.', on, () => act('subagents'), 'subagents'),
+      on ? el('div', { className: 'setting' },
+        el('span', { id: 'lbl-delegate' }, 'Hand off'),
+        picks('Hand off', [['ask', 'When I ask'], ['auto', 'On its own too']], sa.delegate ?? 'ask', (x) => act(`delegate_${x}`), 'delegate')) : null,
+      on ? el('p', { className: 'why wrap', textContent: sa.delegate === 'auto' ? 'I also pass long or separate jobs to a specialist myself, and still do whenever you ask for an agent.' : 'I only hand work to a specialist when you ask for an agent or for work in the background.' }) : null,
       on ? sa.crew.map((c) => el('div', { className: 'slot' },
         el('div', { className: 'setting' },
           el('span', { id: `lbl-crew-${c.id}` }, c.label),
@@ -1167,6 +1171,11 @@
         { kind: 'web', label: 'Web research', hint: 'Searching and reading the web.', value: '' },
         { kind: 'draw', label: 'Drawing and diagrams', hint: 'Cards, charts, diagrams and sketches on screen.', value: '' },
         { kind: 'agents', label: 'Background agents', hint: 'Work I send an agent off to do.', value: '' } ], active: '' },
+      // Subagents: Scout has its own model, Builder follows hybrid's coding model (none set here, so it is off the crew).
+      subagents: { on: true, delegate: 'auto', crew: [
+        { id: 'scout', label: 'Scout', hint: 'Finds things out on the web and writes notes.', value: 'gemini:gemini-3.8-flash', via: 'own', uses: 'gemini:gemini-3.8-flash' },
+        { id: 'builder', label: 'Builder', hint: 'Writes code, pages and scripts, and runs them.', value: '', via: 'hybrid', uses: 'anthropic:claude-sonnet-5' },
+        { id: 'writer', label: 'Writer', hint: 'Documents, slides, emails and copy.', value: '', via: '', uses: '' } ] },
       // If a limit is reached: backups 1 and 2 (the Gemini model is free while Claude is at its limit, so it's in use).
       fallbacks: { on: true, slots: ['gemini:gemini-3.8-flash', ''], limited: [{ label: 'Claude', until: at + 40 * 60e3 }], using: 'gemini:gemini-3.8-flash' },
       // Effort per slot: '' is automatic (low); computer use is set to High, and backup 1 (Gemini, which only thinks at High) too.

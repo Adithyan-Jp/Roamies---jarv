@@ -43,7 +43,7 @@ import { SpeechText, CueFilter, VOICE_CUES, LISTEN_SECS, listenWait, listensAfte
 import { createSpeaker, voiceProblemText, voiceWhy } from './speaker.mjs';
 import { LITE_BUDGET, LITE_TOOLS, LITE_TURNS, liteSystem } from './lite.mjs';
 import { handoffNote } from './quote.mjs';
-import { SUBAGENTS, activeCrew, crewText, findSubagent } from './subagents.mjs';
+import { DELEGATE_MODES, SUBAGENTS, activeCrew, crewText, delegateNote, findSubagent } from './subagents.mjs';
 import { JOB_KINDS, findModelByName, findModelMention, hybridOn, isChitchat, jobKinds, kindOfTool, parseSpec, pickHeavy } from './route.mjs';
 import { becauseOf, createLimits, firstFree, isQuota, limitFrom, untilWords } from './limits.mjs';
 import { SLOTS, isSetting, resolveEffort } from './effort.mjs';
@@ -113,6 +113,7 @@ const DEFAULTS = {
   heavy: { code: '', computer: '', web: '', draw: '', agents: '' }, // hybrid models: a model for each kind of heavy job ('provider:model'), '' = the default model (route.mjs)
   hybrid: false, // the master switch for hybrid models (a model per kind of job, or named in a request)
   subagents: false, // the master switch for subagents: specialists the chat hands background work to (subagents.mjs)
+  delegate: 'ask', // 'ask': hand work to subagents only when they ask for an agent or background work; 'auto': also by itself
   crew: {}, // the model picked for each specialist ('provider:model'); one with none follows hybrid models if they are on
   backups: false, // the master switch for backup models when one is at its limit or unavailable
   fallbacks: ['', ''], // backup models, in order, for when the default hits its usage limit (limits.mjs)
@@ -765,7 +766,7 @@ The <live-state> block at the top of the user's newest message is the current st
 // Made once per request. `context` (the latest user message) picks which facts are relevant. → { turn, memory }
 let lastFactIds = [];
 let frontNow = ''; // set just before each request (whereNow)
-const crewLine = () => { const t = crewText(crewNow(), (sp) => modelName(sp.model)); return t ? `${t}\n` : ''; };
+const crewLine = () => { const t = crewText(crewNow(), (sp) => modelName(sp.model), config.delegate); return t ? `${t}\n` : ''; };
 const livePrompt = (context = '') => {
   const facts = pickFacts(context, 40), total = listFacts().length;
   lastFactIds = facts.map((f) => f.id);
@@ -1324,7 +1325,8 @@ async function prompt(text, image = null, note = '', byVoice = false, news = nul
     // They spoke first: untold news rides along with their message, so it's never announced separately afterwards.
     const along = desk.along(text, { intro: !!intro, news: !!news, agentish });
     const stamped = `[${stampNow()}] ${text}${quiz ? `\n(${quiz})` : ''}${along}`;
-    const toAgent = agentish ? `${stamped}\n(They asked for an agent: call send_agent.)` : stamped;
+    const nudge = !agentish && !intro && !news && !handoff ? delegateNote(text, crewNow(), config.delegate) : '';
+    const toAgent = agentish ? `${stamped}\n(They asked for an agent: call send_agent.)` : nudge ? `${stamped}\n${nudge}` : stamped;
     const asked = handoff ? `${toAgent}\n${handoffNote({ userName, assistant: lookName(), reason: handoff.reason, from: handoff.from, kind: handoff.kind, words: turnWords, untilText: handoff.untilText, because: handoff.because })}` : toAgent;
     const sent = brief ? `${asked}\n(${brief.note})` : asked;
     // An area snap rides along as an image in the same message.
@@ -2092,7 +2094,7 @@ function panelState() {
       mics: mics.list, mic: config.mic ?? '', micAuto: mics.list.find((x) => x.id === mics.auto)?.name ?? '',
       download: NEEDS_MODEL && config.voice && !voiceReady() ? { status: voiceModel.status, pct: voiceModel.total ? Math.floor((voiceModel.done / voiceModel.total) * 100) : 0, size: sizeLabel() } : null,
     } : null,
-    sound: !!config.sound, actions: !!config.allowActions, skipAllow: !!config.skipAllow, lite: !!config.lite, hybrid: { on: !!config.hybrid, jobs: JOB_KINDS.map((j) => ({ ...j, value: parseSpec(config.heavy?.[j.kind])?.spec ?? '' })), active: routed?.spec ?? '' }, subagents: { on: !!config.subagents, crew: SUBAGENTS.map((s) => { const c = activeCrew(config.crew, runnableSpec, hybridActive() ? config.heavy : null).find((x) => x.id === s.id); return { id: s.id, label: s.label, hint: s.hint, value: parseSpec(config.crew?.[s.id])?.spec ?? '', via: c?.via ?? '', uses: c?.spec.spec ?? '' }; }) }, efforts: Object.fromEntries(SLOTS.map((k) => [k, config.efforts?.[k] ?? ''])), fallbacks: { on: !!config.backups, slots: [0, 1].map((i) => parseSpec(config.fallbacks?.[i])?.spec ?? ''), limited: limits.list().filter((l) => !l.key.includes(':') && (isQuota(l.kind) || l.kind === 'busy')).map((l) => ({ label: PROVIDER_LABELS[l.key] ?? l.key, until: l.until })), unavailable: limits.list().filter((l) => !(isQuota(l.kind) || l.kind === 'busy')).map((l) => ({ label: PROVIDER_LABELS[l.key] ?? modelName(l.key.split(':').slice(1).join(':')) ?? l.key, why: becauseOf(l.kind), until: l.until })), using: routed && /^backup/.test(routed.slot ?? '') ? routed.spec : '' }, notch: MAC && notchScreen ? notchMode() : null, brief: { on: !!config.morningBrief, todoist: !!config.briefTodoist, canTodoist: HANDS_OK }, focus: HANDS_OK ? { until: focusBlock?.until ?? null, task: focusBlock?.task ?? '', list: distractionList(), custom: !!config.distractions } : null, sync: { dir: config.syncDir || '', at: syncInfo.at, error: syncInfo.error, paused: !!syncInfo.paused }, gameMode: HANDS_OK ? config.gameSidebar !== false : null,
+    sound: !!config.sound, actions: !!config.allowActions, skipAllow: !!config.skipAllow, lite: !!config.lite, hybrid: { on: !!config.hybrid, jobs: JOB_KINDS.map((j) => ({ ...j, value: parseSpec(config.heavy?.[j.kind])?.spec ?? '' })), active: routed?.spec ?? '' }, subagents: { on: !!config.subagents, delegate: DELEGATE_MODES.includes(config.delegate) ? config.delegate : 'ask', crew: SUBAGENTS.map((s) => { const c = activeCrew(config.crew, runnableSpec, hybridActive() ? config.heavy : null).find((x) => x.id === s.id); return { id: s.id, label: s.label, hint: s.hint, value: parseSpec(config.crew?.[s.id])?.spec ?? '', via: c?.via ?? '', uses: c?.spec.spec ?? '' }; }) }, efforts: Object.fromEntries(SLOTS.map((k) => [k, config.efforts?.[k] ?? ''])), fallbacks: { on: !!config.backups, slots: [0, 1].map((i) => parseSpec(config.fallbacks?.[i])?.spec ?? ''), limited: limits.list().filter((l) => !l.key.includes(':') && (isQuota(l.kind) || l.kind === 'busy')).map((l) => ({ label: PROVIDER_LABELS[l.key] ?? l.key, until: l.until })), unavailable: limits.list().filter((l) => !(isQuota(l.kind) || l.kind === 'busy')).map((l) => ({ label: PROVIDER_LABELS[l.key] ?? modelName(l.key.split(':').slice(1).join(':')) ?? l.key, why: becauseOf(l.kind), until: l.until })), using: routed && /^backup/.test(routed.slot ?? '') ? routed.spec : '' }, notch: MAC && notchScreen ? notchMode() : null, brief: { on: !!config.morningBrief, todoist: !!config.briefTodoist, canTodoist: HANDS_OK }, focus: HANDS_OK ? { until: focusBlock?.until ?? null, task: focusBlock?.task ?? '', list: distractionList(), custom: !!config.distractions } : null, sync: { dir: config.syncDir || '', at: syncInfo.at, error: syncInfo.error, paused: !!syncInfo.paused }, gameMode: HANDS_OK ? config.gameSidebar !== false : null,
     login: login.supported ? { on: login.on } : null,
     update: { available: update.available, installing: update.installing, checking: update.checking, result: update.result, page: update.page, done: update.done },
     intro: !!intro,
@@ -2258,6 +2260,7 @@ async function onMenu(id, via) {
   }
   // The two master switches.
   else if (id === 'hybrid') { config.hybrid = !config.hybrid; routeBack(); saveConfig(); menu(); }
+  else if (/^delegate_(ask|auto)$/.test(id)) { config.delegate = id.slice(9); saveConfig(); menu(); }
   else if (id === 'subagents') { config.subagents = !config.subagents; saveConfig(); menu(); }
   // A specialist's model ('' = none: it follows hybrid models for its kind of job, or is not on the crew).
   else if (/^crew_(\w+):/.test(id)) {

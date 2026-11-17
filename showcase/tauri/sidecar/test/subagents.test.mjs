@@ -1,6 +1,6 @@
 // Subagents: the crew, its models (its own or hybrid's), and the brief a specialist gets (subagents.mjs). Run: npm test
 import assert from 'node:assert/strict';
-import { JOB_OF, SUBAGENTS, activeCrew, crewText, findSubagent, withRole } from '../subagents.mjs';
+import { JOB_OF, SUBAGENTS, activeCrew, crewText, delegateNote, findSubagent, specialistFor, withRole } from '../subagents.mjs';
 
 const all = () => true;
 // Nobody on the crew until a model is picked
@@ -38,5 +38,23 @@ assert.ok(b.startsWith('You are the Scout') && b.endsWith('find chairs'));
 assert.equal(crewText([]), '');
 const t = crewText(crew, (s) => s.model);
 assert.ok(t.includes('- scout:') && t.includes('- builder:') && !t.includes('- writer:') && t.includes('up to 3'));
+
+// Hand off modes: 'ask' says only on request; 'auto' allows it, and nudges by the request's words
+const full = activeCrew({ scout: 'a:b', builder: 'a:b', writer: 'a:b', reviewer: 'a:b', tidier: 'a:b' }, all);
+assert.ok(crewText(crew, (s) => s.model, 'ask').includes('only when they ask'));
+assert.ok(crewText(crew, (s) => s.model, 'auto').includes('Proactive delegation is on'));
+const who = (t, c = full) => specialistFor(t, c)?.id ?? null;
+assert.equal(who('what is the latest news about dentist chair prices'), 'scout');
+assert.equal(who('write a python script that renames these'), 'builder');
+assert.equal(who('draft a report on our Q3 numbers'), 'writer');
+assert.equal(who('review my login function for bugs'), 'reviewer');
+assert.equal(who('tidy up the files in my downloads folder'), 'tidier');
+// Not for chit-chat, system lines, the screen, or a specialist that isn't on the crew
+for (const t of ['thanks!', 'how are you', '(Reminder: stand up)', 'click the blue button', 'draw a diagram of DNS', '']) assert.equal(who(t), null, t);
+assert.equal(who('search the web for dentist chairs', activeCrew({ builder: 'a:b' }, all)), null);
+// The nudge only in auto mode, and it points at a specialist without taking the decision
+assert.equal(delegateNote('search the web for chairs', full, 'ask'), '');
+assert.match(delegateNote('search the web for chairs', full, 'auto'), /Scout subagent.*subagent "scout"/);
+assert.equal(delegateNote('how are you', full, 'auto'), '');
 
 console.log('subagents tests: passed');

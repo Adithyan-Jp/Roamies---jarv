@@ -2,7 +2,7 @@
 // prompt through send_agent's `subagent` argument; the specialist runs as an ordinary background agent (agents.mjs) on
 // the model chosen for it, with its role in front of the brief. Pure pieces here; the launch is in agents.mjs and the
 // settings in sidekick.mjs. A specialist with no model picked is not part of the crew.
-import { parseSpec } from './route.mjs';
+import { isChitchat, jobKinds, parseSpec } from './route.mjs';
 
 export const SUBAGENTS = [
   { id: 'scout', label: 'Scout', type: 'researcher', hint: 'Finds things out on the web and writes notes.',
@@ -47,8 +47,42 @@ export function findSubagent(name, crew) {
 /** The brief a specialist gets: its role first, then the brief the chat wrote (which opens with the user's own words). */
 export const withRole = (sub, brief) => `${sub.role}\n\n${brief}`;
 
-/** The line that tells the chat who is on the crew, or '' when nobody is. */
-export function crewText(crew, nameOf = (spec) => spec) {
+export const DELEGATE_MODES = ['ask', 'auto'];
+
+/** The line that tells the chat who is on the crew, or '' when nobody is. mode 'ask': only when they ask for an agent or
+ *  background work; 'auto': it may also hand off long or separable work by itself (and still does when asked). */
+export function crewText(crew, nameOf = (spec) => spec, mode = 'ask') {
   if (!crew.length) return '';
-  return `Subagents (specialists you can hand work to: send_agent with subagent set to one of these; each runs on its own model, in the background, and you may start up to ${MAX_AT_ONCE} at once for separate parts of one request):\n${crew.map((s) => `- ${s.id}: ${s.hint} (${nameOf(s.spec)})`).join('\n')}`;
+  const when = mode === 'auto'
+    ? 'Proactive delegation is on: besides when they ask, hand work to a specialist on your own when it is long, hands-off or has separate parts (research, building, writing, reviewing, tidying), and not when it is a quick answer or needs the screen. This replaces the rule about asking first; the launch on screen is your reply, so say nothing more.'
+    : 'Delegate only when they ask for an agent or for work in the background.';
+  return `Subagents (specialists you can hand work to: send_agent with subagent set to one of these; each runs on its own model, in the background, and you may start up to ${MAX_AT_ONCE} at once for separate parts of one request). ${when}\n${crew.map((s) => `- ${s.id}: ${s.hint} (${nameOf(s.spec)})`).join('\n')}`;
+}
+
+// Words that point at a specialist beyond the job kind (route.mjs jobKinds says web or code).
+const ROLE_WORDS = {
+  reviewer: /\b(review|proofread|audit|double.?check|look over|check (?:my|the|this) (?:code|work|draft|essay|doc))\b/i,
+  tidier: /\b(tidy|organi[sz]e|rename|clean up|sort)\b[^.?!]{0,40}\b(files?|folders?|downloads|desktop|photos|pictures)\b/i,
+  writer: /\b(write|draft|compose)\b[^.?!]{0,40}\b(essay|report|article|email|letter|post|slides?|deck|document|doc|proposal|summary|blog)\b|\b(slides?|slide deck|presentation)\b/i,
+};
+
+/** For proactive delegation: the specialist a request looks like work for, from its words (no model call), or null.
+ *  Never for chit-chat, system lines or anything that needs the screen. */
+export function specialistFor(text, crew, jobs = jobKinds) {
+  const t = String(text ?? '').trim();
+  if (!crew.length || !t || t.startsWith('(') || isChitchat(t)) return null;
+  const kinds = jobs(t);
+  if (kinds.includes('computer') || kinds.includes('draw')) return null;
+  const by = (id) => crew.find((s) => s.id === id) ?? null;
+  for (const id of ['reviewer', 'tidier', 'writer']) if (ROLE_WORDS[id].test(t) && by(id)) return by(id);
+  if (kinds.includes('web') && by('scout')) return by('scout');
+  if (kinds.includes('code') && by('builder')) return by('builder');
+  return null;
+}
+
+/** The nudge added to a request in proactive mode, '' when none. It points at a specialist; the chat still decides. */
+export function delegateNote(text, crew, mode, jobs = jobKinds) {
+  if (mode !== 'auto') return '';
+  const s = specialistFor(text, crew, jobs);
+  return s ? `(This looks like work for the ${s.label} subagent: unless it is a quick answer, call send_agent with subagent "${s.id}" and its own complete prompt.)` : '';
 }
