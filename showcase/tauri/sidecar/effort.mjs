@@ -1,6 +1,6 @@
 // Effort: how hard a model thinks before answering, set per model slot (the default model, each heavy job's model,
 // each backup). Each model supports its own levels (getSupportedThinkingLevels); a slider offers Off plus those.
-export const SLOTS = ['default', 'computer', 'code', 'agents', 'draw', 'web', 'backup1', 'backup2'];
+export const SLOTS = ['default', 'computer', 'code', 'agents', 'draw', 'web', 'backup1', 'backup2', 'sub_scout', 'sub_builder', 'sub_writer', 'sub_reviewer', 'sub_tidier'];
 export const LADDER = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
 /** A setting: '' (automatic), 'off' or a level. */
 export const isSetting = (v) => v === '' || v === 'off' || LADDER.includes(v);

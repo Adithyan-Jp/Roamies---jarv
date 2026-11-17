@@ -564,6 +564,7 @@
         effortRow('default', model, true),
         toggle('Lite mode', 'For small or local models. Fewer features.', state.lite, () => act('lite'), 'lite')),
       hybridGroup(),
+      subagentGroup(),
       fallbackGroup(),
       el('div', { className: 'group paged' },el('div', { className: 'ghead' }, el('h2', { textContent: 'Accounts' }), el('p', { textContent: 'Sign in to use their models.' })), box),
       foot(null, nav),
@@ -618,6 +619,23 @@
       on ? row(2, 'Second backup') : null,
       on ? groupHint(slots) : null,
       on && chain ? el('p', { className: 'why wrap', textContent: chain }) : null);
+  }
+  // Subagents: specialists the chat hands background work to. Each runs on the model picked here; one with no model
+  // follows the model hybrid models set for its kind of job (when those are on), else it is not on the crew.
+  function subagentGroup() {
+    const sa = state.subagents;
+    if (!sa || !state.providers.some((p) => p.on)) return null;
+    const on = !!sa.on, hybridOn = !!(state.hybrid && state.hybrid.on);
+    return el('div', { className: 'group' },
+      el('div', { className: 'ghead' }, el('h2', { textContent: 'Subagents' }),
+        el('p', { className: 'wrap', textContent: 'Specialists I can hand background work to, each on the model you pick. I write each one its own prompt from your words.' })),
+      toggle('Use subagents', 'I can start up to three at once for separate parts of a request. They work in the background and report back.', on, () => act('subagents'), 'subagents'),
+      on ? sa.crew.map((c) => el('div', { className: 'slot' },
+        el('div', { className: 'setting' },
+          el('span', { id: `lbl-crew-${c.id}` }, c.label),
+          modelSelect(`${c.label} model`, `crew_${c.id}`, c.value, hybridOn ? 'Follow hybrid' : 'Off', (sel) => act(`crew_${c.id}:${sel.value}`))),
+        el('p', { className: 'why wrap', textContent: c.via === 'hybrid' ? `${c.hint} Using ${modelName(c.uses)} from hybrid models.` : c.hint }),
+        c.value ? effortRow(`sub_${c.id}`, c.value) : null)) : null);
   }
   // A local server: connected (a lit dot) or not, its address if it was added, and why its models aren't in the
   // Model menu (not running, or none can see images). Ollama and LM Studio disconnect; added ones are removed.

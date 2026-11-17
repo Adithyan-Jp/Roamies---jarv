@@ -19,6 +19,6 @@ assert.equal(resolveEffort('high', undefined), null);
 // Settings and slots
 for (const ok of ['', 'off', ...LADDER]) assert.ok(isSetting(ok), ok);
 for (const bad of ['loud', 'LOW', null, undefined, 3]) assert.ok(!isSetting(bad), String(bad));
-assert.deepEqual(SLOTS, ['default', 'computer', 'code', 'agents', 'draw', 'web', 'backup1', 'backup2']);
+assert.deepEqual(SLOTS, ['default', 'computer', 'code', 'agents', 'draw', 'web', 'backup1', 'backup2', 'sub_scout', 'sub_builder', 'sub_writer', 'sub_reviewer', 'sub_tidier']);
 
 console.log('effort tests: passed');
