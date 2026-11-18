@@ -38,7 +38,7 @@ const AREAS = {
     code: 'E20',
     unknown: () => 'Something went wrong (E20). Ask me again.',
     known: [
-      ['E21', /Claude Code isn't installed/i, () => 'Claude Code is missing. Sign in with Claude again.', false, 'model'],
+      ['E21', /Claude Code is updating/i, () => 'Claude Code is updating. Ask me again in a minute.'],
       ['E22', /not logged in|NotLoggedIn|\b401\b|unauthori[sz]ed|invalid_grant|token refresh failed|authentication_error|(?:invalid|incorrect).{0,6}api.?key/i, (c) => `My ${c.who} login stopped working. Sign in again.`, false, 'model'],
       ['E23', /insufficient_quota|credit balance|billing|payment required|\b402\b/i, () => 'This account is out of credit. Top up or switch model.', false, 'model'],
       ['E24', /usage.?limit|quota|rate.?limit|\b429\b|too many requests/i, () => "I've hit this model's usage limit. Pick another model.", false, 'model'],

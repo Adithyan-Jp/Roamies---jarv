@@ -791,6 +791,8 @@ final class Voice {
 
     private func finalize() {
         guard phase == .finishing else { return }
+        // An error or final result can land before the tail timer fires; its stop must still happen.
+        stopAudio()
         finishTimer?.invalidate(); finishTimer = nil
         rec?.cancel(); rec = nil
         phase = .idle

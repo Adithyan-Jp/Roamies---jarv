@@ -5,13 +5,13 @@
 // in:  {type:'menu', id} {type:'answer', id, text} {type:'ui_ready'}
 // out: {type:'menu', items} {type:'ui', msg} {type:'overlays', ids}
 import { Agent } from '@kenkaiiii/gg-agent';
-import { ClaudeCodeAgent, closeSpare } from './claudecode.mjs';
+import { ClaudeCodeAgent, claudeCodeInstaller, closeSpare } from './claudecode.mjs';
 import { SAFE, checkDrawAction, checkLink, checkOpen, checkRead, checkWrite, redactArgs } from './safety.mjs';
 import { agentsRoot, createAgents, holdAfterLaunch, newsDesk, wantsAgent } from './agents.mjs';
 import { agentEvents, stallWatch } from './agentstream.mjs';
 import { CATALOG_PROVIDERS, createCatalogs } from './catalogs.mjs';
 import {
-  AUTH_PROVIDERS, AuthStorage, OPENAI_CHATGPT_KEY, apiKeyStorageKeys, claudeCodeEnv, dualAuthProvider, getAuthStorageKeys, getContextWindow, getDefaultModel, getModel,
+  AUTH_PROVIDERS, AuthStorage, OPENAI_CHATGPT_KEY, apiKeyStorageKeys, claudeCodeEnv, dualAuthProvider, ensureClaudeCodeBinary, getAuthStorageKeys, getContextWindow, getDefaultModel, getModel,
   getModelsForProvider, loginChatGPT, ollamaServedContext, parseLocalModelId, pointScale, registerRuntimeModels, resolveClaudeCodeBinary, revokeChatGPTSignIn, signInWithClaudeCode,
   signOutOfClaudeCode, storageKeyProvider,
 } from '@kenkaiiii/gg-core';
@@ -49,7 +49,7 @@ import { createSecrets, retryLoad, runInput } from './secrets.mjs';
 import { showTrayIcon } from './wintray.mjs';
 import { createActivity } from './activity.mjs';
 import { canCircle, canSnap, cleanMics, talkChords, hasHands, hasHotkeys, hasVoice, linuxSession, micTrouble, needsVoiceModel, platformLine, samePair, seesPointer, writeChord, writeChords } from './platform.mjs';
-import { accountKeys, keyCards, keyKinds, seesImages, signInCards } from './providers.mjs';
+import { accountKeys, fallbackModel, keyCards, keyKinds, seesImages, signInCards } from './providers.mjs';
 import { OLLAMA, connectLocal, contextNote, downNote, forgetLocal, isSmallModel, newServer, noModelsNote, serverFor, serverList, syncLocal as syncServers, withWindow } from './local.mjs';
 import { activityLogs, buildReport, redact, reportDir, reportName, reveal, run, scrubConfig, tail } from './diagnostics.mjs';
 import { detailsText, explain } from './errors.mjs';
@@ -457,7 +457,7 @@ function ensureModel() {
   const p = ['anthropic', 'openai', 'gemini', ...MENU_PROVIDERS].find((x) => runnable(x).length);
   if (!p) return false;
   config.provider = p;
-  config.model = [FAST[p], getDefaultModel(p).id].find((id) => id && canRun(p, id)) ?? runnable(p)[0].id;
+  config.model = fallbackModel([config.lastModels?.[p], FAST[p], getDefaultModel(p).id], (id) => canRun(p, id), runnable(p));
   saveConfig();
   return true;
 }
@@ -728,12 +728,13 @@ let credsAccountId;
 const requestBudget = () => Math.min(config.lite ? LITE_BUDGET : BUDGET_CAP, getContextWindow(config.model, { provider: config.provider, ...(agentRoute === 'api' && credsAccountId ? { accountId: credsAccountId } : {}) }) * 0.5);
 // Claude Code's session for this conversation, so a rebuilt agent continues it instead of starting over.
 let ccResume = null;
+const claudeCode = claudeCodeInstaller({
+  resolve: () => resolveClaudeCodeBinary(), ensure: () => ensureClaudeCodeBinary(), log: (r) => logLine('claude_code_install', r),
+});
 // The Claude Code process when Anthropic is signed in with Claude (else null: the API, with a key or another provider).
 async function claudeCodeRoute() {
   if (config.provider !== 'anthropic' || !(await auth.hasClaudeCodeLogin().catch(() => false))) return null;
-  const executable = resolveClaudeCodeBinary();
-  if (!executable) throw new Error(`Claude Code isn't installed anymore. Sign in with Claude again on the Model page in ${PANEL}.`);
-  return { executable, env: claudeCodeEnv() };
+  return { executable: claudeCode.binary(), env: claudeCodeEnv() };
 }
 // What a new agent runs on: the provider, model and route picked right now, with the chat's thinking level.
 async function agentModel() {
@@ -2086,7 +2087,7 @@ async function onMenu(id, via) {
   else if (id.startsWith('model:')) {
     const [, p, ...rest] = id.split(':');
     if (!canRun(p, rest.join(':'))) return;
-    config.provider = p; config.model = rest.join(':'); agent = null; saveConfig(); menu();
+    config.provider = p; config.model = rest.join(':'); config.lastModels = { ...config.lastModels, [p]: config.model }; agent = null; saveConfig(); menu();
     // A small local model can't do most of what the full Roamies asks of it: Lite mode is suggested (#73).
     const small = p === 'local' && !config.lite && isSmallModel(config.model);
     say(`Switched to ${getModel(config.model)?.name ?? config.model}.${small ? ' It looks like a small model, so Lite mode may suit it better: switch it on on the Model page.' : ''}`, small ? 'concerned' : 'happy');
@@ -2496,6 +2497,8 @@ let retired = (async () => {
 })();
 await retired;
 await refreshAuth();
+// Signed in with Claude, but this version's Claude Code isn't there yet (#101): fetched before the first request.
+if (oauthOn.get('anthropic')) claudeCode.start();
 // Before ensureModel, so a local model that's picked is still there (and an OpenRouter or OpenCode one).
 if (signedIn.get('local')) await syncLocal();
 await catalogs.load();

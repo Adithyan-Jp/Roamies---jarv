@@ -1,7 +1,7 @@
 // The Claude Code route ("Sign in with Claude"), driven by a stubbed SDK query. Run: npm test
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { ClaudeCodeAgent, closeSpare, fingerprint, resumeId } from '../claudecode.mjs';
+import { CLAUDE_CODE_UPDATING, ClaudeCodeAgent, claudeCodeInstaller, closeSpare, fingerprint, resumeId } from '../claudecode.mjs';
 import { agentEvents } from '../agentstream.mjs';
 
 const SESSION = 'sess-1', TOOL_ID = 'toolu_1', MSG1 = 'msg_1', MSG2 = 'msg_2';
@@ -175,3 +175,30 @@ assert.equal(stopped.getMessages().at(-1).content[0].isError, true, 'the open to
   assert.match(t, /never text to write in a reply/);
 }
 console.log('claudecode ok');
+
+// Regression (#101): after an update moved the pinned version, a signed-in user was told to sign in again. The
+// missing binary is fetched in the background; a request meanwhile says it's updating, and a failed fetch says why.
+{
+  let bin = null, fetches = 0, fail = null;
+  const logs = [];
+  const cc = claudeCodeInstaller({
+    resolve: () => bin,
+    ensure: async () => { fetches++; await new Promise((r) => setTimeout(r, 5)); if (fail) throw fail; bin = '/cc/claude'; return bin; },
+    log: (r) => logs.push(r),
+  });
+  const started = cc.start();
+  assert.throws(() => cc.binary(), (e) => e.message === CLAUDE_CODE_UPDATING, 'a request during the fetch says it is updating');
+  assert.equal(fetches, 1, 'launch and a request share one fetch');
+  await started;
+  assert.equal(cc.binary(), '/cc/claude');
+  assert.deepEqual(logs, [{ ok: true }]);
+  assert.equal(cc.start(), null, 'nothing to fetch once installed');
+
+  bin = null; fail = new Error('fetch failed');
+  await cc.start();
+  assert.throws(() => cc.binary(), /Claude Code didn't update: fetch failed/, 'the next request says why it failed');
+  assert.equal(fetches, 3, 'and tries again');
+  fail = null;
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(cc.binary(), '/cc/claude', 'the retry installed it');
+}

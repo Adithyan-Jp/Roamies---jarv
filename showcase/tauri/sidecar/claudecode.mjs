@@ -526,3 +526,28 @@ export class ClaudeCodeAgent {
     }
   }
 }
+
+export const CLAUDE_CODE_UPDATING = 'Claude Code is updating. Ask me again in a minute.';
+// An app update can move gg-core's pinned Claude Code version, leaving a signed-in user without the binary (#101):
+// fetch the pinned one in the background instead of asking them to sign in again. resolve/ensure: gg-core's.
+export function claudeCodeInstaller({ resolve, ensure, log = () => {} }) {
+  let running = null, failed = null;
+  const start = () => {
+    if (running || resolve()) return running;
+    failed = null;
+    running = ensure().then(() => log({ ok: true }), (e) => { failed = e; log({ ok: false, error: String(e?.message ?? e) }); })
+      .finally(() => { running = null; });
+    return running;
+  };
+  return {
+    start,
+    // The binary, else an error to show: it's being fetched, or why the last try failed (asking again retries).
+    binary() {
+      const bin = resolve();
+      if (bin) return bin;
+      const last = running ? null : failed;
+      start();
+      throw new Error(last ? `Claude Code didn't update: ${last?.message ?? last}` : CLAUDE_CODE_UPDATING);
+    },
+  };
+}
