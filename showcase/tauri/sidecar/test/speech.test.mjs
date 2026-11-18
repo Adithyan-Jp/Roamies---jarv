@@ -189,3 +189,22 @@ assert.deepEqual(early(['Hi there. Let me check the weather in Paris for you now
   assert.deepEqual(out, ['Sure, I can check the weather in Paris for you today,', 'one moment.'], 'capped after 60 characters');
 }
 console.log('speech early and cap tests: passed');
+
+{ // The face follows the voice: every mood, tone and sound has a feeling (but the plain ones), and the feelings read.
+  const { cueFeel, FEELS } = await import('../speech.mjs');
+  const plain = new Set(['narrator', 'emphasis', 'clear throat']);
+  for (const c of [...VOICE_CUES.emotions, ...VOICE_CUES.tones, ...VOICE_CUES.sounds]) if (!plain.has(c)) assert.ok(cueFeel(`[${c}] Hi.`), `${c} has a feeling`);
+  const all = Object.values(FEELS).flat();
+  assert.equal(new Set(all).size, all.length, 'each cue in one feeling');
+  assert.equal(cueFeel('[slightly sad] Oh no.'), 'sad');
+  assert.equal(cueFeel('[warm and curious] Tell me.'), 'warm');
+  assert.equal(cueFeel('[quietly, a little embarrassed] Oops.'), 'sad');
+  assert.equal(cueFeel('[laughing] Ha ha, fair.'), 'laugh');
+  assert.equal(cueFeel('It is [emphasis] today, [excited] wow.'), 'joy', 'the first cue with a feeling');
+  assert.equal(cueFeel('No cue here.'), null);
+  assert.equal(cueFeel('[narrator] Once.'), null);
+  const agent = (await import('node:fs')).readFileSync(new URL('../../../roamies/agent.js', import.meta.url), 'utf8');
+  const drawn = agent.slice(agent.indexOf('const FEEL = {'), agent.indexOf('};', agent.indexOf('const FEEL = {')));
+  for (const f of Object.keys(FEELS)) assert.match(drawn, new RegExp(`\\n\\s+${f}: \\{`), `the face draws ${f}`);
+  console.log('cue feeling tests: passed');
+}

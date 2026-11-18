@@ -46,12 +46,16 @@ voice, keeps track of what you said you'd do and nudges you when it's due.
 | ---------------- | ------------------------------------------------------- |
 | **JARVIS**       | **A glowing sphere of light that ripples as it speaks** |
 | Roamie           | The original: a tiny glowing pixel creature             |
+| GlayOS           | A pixel robot head with one glowing eye                 |
+| Ultren           | A pixel chrome robot with glowing eyes                  |
 | Anime Girl       | A pixel anime girl                                      |
 | Sarah            | A pixel woman                                           |
 | Adrian           | A pixel man                                             |
 | Rita X           | A pixel secretary in cat-eye glasses                    |
 
 <sub>Each one has its own name, voice and animations, in three sizes: Default, Small, or Cursor, a pixel pointer that rides along with your mouse.</sub>
+
+<sub>Some looks are fan tributes to characters from films and games. Roamies is a free project, not affiliated with or endorsed by Marvel, Disney or Valve, and all trademarks belong to their owners. If you hold the rights to one and want it removed, email [ken@kenkais.com](mailto:ken@kenkais.com).</sub>
 
 ## JARVIS shows you how
 

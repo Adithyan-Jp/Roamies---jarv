@@ -17,6 +17,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_VOICE, FISH_MODELS, FREE_MODEL, FishVoice, RATE, fishAccount } from './fish.mjs';
 import { StudioVoice, studioStatus } from './voicestudio.mjs';
+import { cueFeel } from './speech.mjs';
 import { GEMINI_DEFAULT_VOICE, GEMINI_MODEL, GEMINI_MODELS, GEMINI_PITCH, GEMINI_RATE, GeminiVoice, geminiAccount } from './gemini.mjs';
 
 // The services that can speak. models: priciest first, the pick and the ones after it are tried in turn; pick:
@@ -288,9 +289,17 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
     stopAll();
     const id = `s${++seq}`, said = [];
     let ended = false, tries = 0, v = null, heard = false, done = false, beat = false, t0 = Date.now();
+    // The face follows the voice: a sentence whose feeling differs from the last one's (speech.mjs cueFeel) is marked
+    // with where it starts, in characters spoken so far (cues left out); the overlay times it by the audio played.
+    let spoken = 0, feel = null;
+    const mark = (s) => {
+      const f = cueFeel(s);
+      if (f !== feel) { feel = f; emit({ kind: 'speech', id, feel: f, at: spoken }); }
+      spoken += s.replace(/\[[^\]]*\]\s*/g, '').length + 1;
+    };
     const me = {
       id,
-      say(s) { if (done) return; said.push(s); v.say(s); },
+      say(s) { if (done) return; mark(s); said.push(s); v.say(s); },
       /** Something slow is starting: a short beat, unless it's already said something. */
       beat() {
         if (done || beat || said.length || heard) return false;
@@ -298,6 +307,7 @@ export function createSpeaker({ emit, onProblem = () => {}, log = () => {}, Fish
         const phrase = pickBeat(), shippedBeat = shipped()?.get(phrase), chunks = beats.get(phrase);
         if (!shippedBeat && !chunks) { me.say(phrase); return true; }
         log('speech_beat', { id, ms: Date.now() - t0 });
+        spoken += phrase.length + 1; // played ahead of the reply, so the feelings after it start later
         if (shippedBeat) emit({ kind: 'speech', id, rate: shippedBeat.rate, pcm: shippedBeat.pcm });
         else for (const pcm of chunks) emit({ kind: 'speech', id, rate: P.play ?? P.rate, pcm });
         return true;

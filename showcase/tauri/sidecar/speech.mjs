@@ -32,6 +32,37 @@ export const VOICE_CUES = {
   // Background and pauses.
   effects: ['audience laughing', 'background laughter', 'crowd laughing', 'break', 'long-break'],
 };
+// What each cue looks like on the face while it's said (agent.js FEEL draws these): the cues grouped into a few
+// feelings. Cues not listed (narrator, emphasis, pauses, clear throat) leave the face as it is.
+export const FEELS = {
+  joy: ['happy', 'excited', 'satisfied', 'delighted', 'proud', 'hopeful', 'optimistic', 'enthusiastic', 'relieved', 'ecstatic', 'triumphant', 'playful', 'amused', 'cheerful', 'upbeat'],
+  laugh: ['laughing', 'chuckling', 'audience laughing', 'background laughter', 'crowd laughing'],
+  warm: ['calm', 'empathetic', 'moved', 'relaxed', 'grateful', 'sympathetic', 'compassionate', 'friendly', 'helpful', 'warm', 'gentle', 'caring', 'kind', 'soothing', 'reassuring', 'sincere', 'tender', 'whispering', 'soft tone'],
+  sad: ['sad', 'depressed', 'embarrassed', 'unhappy', 'disappointed', 'regretful', 'guilty', 'ashamed', 'pessimistic', 'nostalgic', 'lonely', 'concerned', 'apologetic', 'sheepish', 'wistful', 'sighing'],
+  cry: ['sobbing', 'crying loudly'],
+  angry: ['angry', 'upset', 'frustrated', 'disgusted', 'jealous', 'envious', 'furious', 'groaning'],
+  shout: ['shouting', 'screaming'],
+  surprised: ['surprised', 'impressed', 'gasping'],
+  scared: ['nervous', 'scared', 'worried', 'anxious', 'hysterical', 'terrified', 'panting'],
+  curious: ['curious', 'uncertain', 'doubtful', 'confused', 'mysterious', 'interested', 'thoughtful'],
+  smug: ['sarcastic', 'disdainful', 'contemptuous', 'teasing', 'mischievous', 'cheeky'],
+  flat: ['indifferent', 'bored', 'resigned', 'dry', 'deadpan', 'solemn'],
+  determined: ['confident', 'determined', 'encouraging', 'urgent', 'brave', 'serious', 'in a hurry tone'],
+  tired: ['yawning', 'snoring'],
+};
+const FEEL_OF = new Map(Object.entries(FEELS).flatMap(([f, cues]) => cues.map((c) => [c, f])));
+/** The feeling of a sentence: its first cue that has one, read from the cue's words ("[slightly sad]", "[warm and
+ * curious]", "[quietly, a little embarrassed]"), or null. */
+export function cueFeel(sentence) {
+  for (const [, inner] of String(sentence).matchAll(/\[([^\]\n]{1,60})\]/g)) {
+    for (const part of inner.toLowerCase().split(/,|\band\b/)) {
+      const words = part.trim().replace(/^(?:slightly|very|extremely|a bit|a little|quietly|deeply)\s+/, '');
+      const f = FEEL_OF.get(words) ?? words.split(/\s+/).map((w) => FEEL_OF.get(w)).find(Boolean);
+      if (f) return f;
+    }
+  }
+  return null;
+}
 export const CUE_INTENSITY = ['slightly', 'very', 'extremely', 'a bit', 'a little', 'quietly', 'deeply'];
 const alt = (list) => list.slice().sort((a, b) => b.length - a.length).map((x) => x.replace(/[-]/g, '\\-')).join('|');
 const MOOD = alt(VOICE_CUES.emotions);

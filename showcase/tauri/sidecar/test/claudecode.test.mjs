@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { CLAUDE_CODE_UPDATING, ClaudeCodeAgent, claudeCodeInstaller, closeSpare, fingerprint, resumeId } from '../claudecode.mjs';
 import { agentEvents } from '../agentstream.mjs';
+import { CLAUDE_CODE_MANIFEST } from '@kenkaiiii/gg-core';
+import { readFileSync } from 'node:fs';
 
 const SESSION = 'sess-1', TOOL_ID = 'toolu_1', MSG1 = 'msg_1', MSG2 = 'msg_2';
 const ev = (event) => ({ type: 'stream_event', event, parent_tool_use_id: null, session_id: SESSION });
@@ -201,4 +203,10 @@ console.log('claudecode ok');
   fail = null;
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(cc.binary(), '/cc/claude', 'the retry installed it');
+}
+
+// The SDK drives gg-core's pinned Claude Code binary: updating one without the other is a version mismatch.
+{
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(pkg.dependencies['@anthropic-ai/claude-agent-sdk'], CLAUDE_CODE_MANIFEST.sdkVersion, `@anthropic-ai/claude-agent-sdk must stay on ${CLAUDE_CODE_MANIFEST.sdkVersion}, the version gg-core's Claude Code is pinned to`);
 }

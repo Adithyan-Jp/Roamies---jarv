@@ -1,6 +1,27 @@
 {
   "updates": [
     {
+      "version": null,
+      "date": "2026-11-18",
+      "items": [
+        { "kind": "new", "title": "Meet Ultren", "text": "A chrome machine with glowing eyes and a grand, dark wit. Try him in Appearance." },
+        { "kind": "new", "title": "Meet GlayOS", "text": "A one-eyed lab AI. Deadpan, clinical, and every task is a test." },
+        { "kind": "new", "title": "My face feels it", "text": "My face follows my voice: a grin when I'm glad, a frown when I'm sad." },
+        { "kind": "new", "title": "Each look talks its way", "text": "Every look has its own way of talking now, not just its own voice." },
+        { "kind": "new", "title": "Subagents", "text": "A crew of specialists I hand background work to. Thanks ihabfawaqa-hue!" },
+        { "kind": "new", "title": "Hybrid and backup models", "text": "Mix models, switch when one hits a limit, set effort per model. Thanks ihabfawaqa-hue!" },
+        { "kind": "new", "title": "Speak in", "text": "Pick the language you talk in, so I hear Arabic and Hebrew. Thanks ihabfawaqa-hue!" },
+        { "kind": "improved", "title": "Arabic replies", "text": "Arabic shows in a matching font, right to left, everywhere. Thanks ihabfawaqa-hue!" },
+        { "kind": "improved", "title": "Agents hear you", "text": "Agents get your exact words, not just my reading of them. Thanks ihabfawaqa-hue!" },
+        { "kind": "improved", "title": "Quicker VoiceStudio", "text": "It stays warm, starts sooner and keeps spoken replies short. Thanks ihabfawaqa-hue!" },
+        { "kind": "improved", "title": "Tidier settings", "text": "Model, Listening, Memory and Appearance now have tabs." },
+        { "kind": "improved", "title": "Speech model help", "text": "I point you to Listening when the speech model needs a download. Thanks mattschwarz!" },
+        { "kind": "fixed", "title": "Mic closes properly", "text": "The mic no longer stays open after a quick release. Thanks mattschwarz!" },
+        { "kind": "fixed", "title": "Claude after updates", "text": "With Claude sign-in, I get the Claude Code I need after updates. Thanks mattschwarz!" },
+        { "kind": "fixed", "title": "Your model stays picked", "text": "I keep the model you picked instead of going back. Thanks JavierOIayo!" }
+      ]
+    },
+    {
       "version": "0.1.41",
       "date": "2026-11-17",
       "items": [

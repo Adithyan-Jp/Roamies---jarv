@@ -536,3 +536,15 @@ console.log('bundled beats: passed');
   sp.setProvider('gemini'); assert.deepEqual(sp.localOpts(), { early: false, cap: 0 }, 'Gemini: as before');
   console.log('speaker localOpts tests: passed');
 }
+
+{ // The face follows the voice: a sentence with a new feeling is marked with where it starts (cues and beats counted right).
+  const { sp, out } = setup({ ok: true, credit: 4.5 }, ['On it.'], () => new Map([['On it.', { rate: 44100, pcm: 'AAA=' }]]));
+  sp.setKey('k'); await tick();
+  const r = sp.start();
+  assert.equal(r.beat(), true);
+  r.say('[excited] We did it!'); r.say('[happy] Really.'); r.say('Next up.'); r.say('[sad] Oh.'); r.end();
+  const feels = out.filter((m) => 'feel' in m).map(({ feel, at }) => [feel, at]);
+  assert.deepEqual(feels, [['joy', 7], [null, 26], ['sad', 35]], 'the beat and spoken text before each; no repeat; no cue is a plain face');
+  assert.ok(out.filter((m) => 'feel' in m).every((m) => m.id === r.id && m.kind === 'speech'));
+  console.log('speaker feeling tests: passed');
+}

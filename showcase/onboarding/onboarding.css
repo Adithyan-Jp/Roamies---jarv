@@ -274,6 +274,8 @@ select {
 select option { background: #061719; color: var(--ink); }
 select:focus-visible { outline: none; }
 .note { margin: 8px 0 0; font-size: 11px; line-height: 1.4; color: var(--ink-3); }
+/* A list after a note keeps the gap a list has after the lead line. */
+.note + .rows { margin-top: 18px; }
 .field-row { display: flex; gap: 8px; }
 .field { display: flex; flex: 1; min-width: 0; --bc: var(--line-hi); --fill: #061719; }
 /* A field takes focus from a click as well as the keyboard, so it lights up in the accent instead of the thick white

@@ -741,7 +741,7 @@
     get style() { return drop() ? 'drop' : 'spread'; },
     // The name on the capsule: the look's own (JARVIS, Roamie, …).
     set name(v) { $('.nc-mark').textContent = String(v || 'JARVIS'); if (st.open) apply(shape); },
-    // The look in the lens: 'jarvis', a person ('anime', 'sarah', 'adrian', 'rita'), or 'classic' (the Roamie blob).
+    // The look in the lens: 'jarvis', a person ('anime', 'sarah', 'adrian', 'rita', 'ultren', 'glayos'), or 'classic' (the Roamie blob).
     set look(v) { st.look = String(v || 'jarvis'); jst.swing = null; },
     set style(v) {
       const d = v === 'drop';

@@ -1116,6 +1116,24 @@
         return p;
       },
     };
+    // The voice's feeling (voice-out.js feel()) on the face while it talks: the eyes (the kit's face moods), the brows
+    // and the mouth between words. Every look draws these its own way (JARVIS, with no face, by its heart and a tremor).
+    const FEEL = {
+      joy: { face: 'happy', rest: 'grin' },
+      laugh: { face: 'happy', brow: 'raised', rest: 'grin' },
+      warm: { rest: 'closed' },
+      sad: { brow: 'sad', rest: 'frown' },
+      cry: { brow: 'sad', rest: 'frown' },
+      angry: { brow: 'angry', rest: 'frown' },
+      shout: { face: 'surprised', brow: 'angry' },
+      surprised: { face: 'surprised', brow: 'raised', rest: 'o' },
+      scared: { face: 'surprised', brow: 'sad', rest: 'flat' },
+      curious: { brow: 'raised', rest: 'flat' },
+      smug: { brow: 'determined', rest: 'closed' },
+      flat: { rest: 'flat' },
+      determined: { brow: 'determined', rest: 'flat' },
+      tired: { brow: 'sad', rest: 'o' },
+    };
     function bubblePose(dt) {
       {
         const t = now;
@@ -1140,16 +1158,18 @@
         const talking = b.shown < b.text.length || !!R.voiceOut?.playing();
         gestT += dt * (talking ? 1 : 0.3);
         const g = Math.sin(gestT * 3.1), g2 = Math.sin(gestT * 1.7 + 1);
-        const brow = b.mood === 'annoyed' ? 'angry' : b.mood === 'concerned' ? 'raised' : b.mood === 'determined' ? 'determined' : null;
+        const said = talking ? R.voiceOut?.feel?.() ?? null : null, feel = FEEL[said];
+        if (feel?.face) face.set(feel.face, 0.25);
+        const brow = feel?.brow ?? (b.mood === 'annoyed' ? 'angry' : b.mood === 'concerned' ? 'raised' : b.mood === 'determined' ? 'determined' : null);
         if (b.point) {
           const bob = Math.sin(t * 5) * 0.06;
-          return { arms: 1, tr: [b.point[0], b.point[1] + bob], tl: [-0.9, 0.45], mouth: mouthT > 0 ? mouthMode : 'grin', brow: 'raised', mode: talking ? 'talk' : null };
+          return { arms: 1, tr: [b.point[0], b.point[1] + bob], tl: [-0.9, 0.45], mouth: mouthT > 0 ? mouthMode : feel?.rest ?? 'grin', brow: feel?.brow ?? 'raised', rest: feel?.rest, feel: said, mode: talking ? 'talk' : null };
         }
         return {
           arms: talking ? 1 : 0.4,
           tr: [0.95 + g * 0.08, 0.05 - Math.max(0, g) * 0.35], tl: [-0.98 - g2 * 0.06, 0.25 - Math.max(0, g2) * 0.18],
           // No hop while it talks: the body (and the bubble and cards placed from it) stays level to be read.
-          mouth: mouthT > 0 ? mouthMode : b.mood === 'annoyed' ? 'frown' : null, brow, mode: talking ? 'talk' : null,
+          mouth: mouthT > 0 ? mouthMode : feel?.rest ?? (b.mood === 'annoyed' ? 'frown' : null), brow, rest: feel?.rest, feel: said, mode: talking ? 'talk' : null,
         };
       }
     }
