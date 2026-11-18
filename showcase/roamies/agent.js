@@ -715,7 +715,7 @@
         let f = fonts.get(st);
         if (!f) {
           const w = st & (md?.BOLD ?? 0) ? 700 : base, it = st & (md?.ITAL ?? 0) ? 'italic ' : '';
-          f = `${it}${w} ${fpx}px "Martian Mono", Menlo, ui-monospace, monospace`; fonts.set(st, f);
+          f = `${it}${w} ${fpx}px "Martian Mono", "Roamies Arabic", Menlo, ui-monospace, monospace`; fonts.set(st, f);
         }
         return f;
       };
@@ -733,7 +733,8 @@
         if (R.rtl(line.s)) {
           const n = Math.min(line.s.length, shown - line.start);
           if (n > 0) {
-            if (curFont !== fontFor(0)) { curFont = fontFor(0); tctx.font = curFont; }
+            const rf = R.rtlFont(line.s, fontFor(0)); // its own narrow space between Arabic words
+            if (curFont !== rf) { curFont = rf; tctx.font = rf; }
             tctx.fillStyle = ink; tctx.direction = 'rtl'; tctx.textAlign = 'right';
             tctx.fillText(line.s.slice(0, n).trimEnd(), iw, cy, iw);
             tctx.direction = 'ltr'; tctx.textAlign = 'left';

@@ -24,6 +24,7 @@ function node(tag) {
     setAttribute(k, v) { attrs[k] = String(v); }, getAttribute: (k) => attrs[k] ?? null,
     getBoundingClientRect: () => ({ left: 0, top: 0, right: 500, bottom: 60, width: 500, height: 60 }),
     querySelector: (q) => (found[q] ??= node('div')), querySelectorAll: () => [], appendChild: (c) => kids.push(c), append: (...c) => kids.push(...c),
+    replaceChildren(...c) { kids.length = 0; kids.push(...c); }, get children() { return kids; },
     addEventListener: noop, animate: () => ({ cancel: noop }), getAnimations: () => [], getContext: () => new Proxy({}, { get: () => noop }),
     scrollHeight: 0, offsetHeight: 0, offsetWidth: 0,
   };
@@ -60,6 +61,20 @@ assert.equal(R.notchHit(100, 20), true, 'a reply can be clicked (fold it, open i
 R.notch.done();
 flush();
 assert.equal(sr.textContent, 'Hello there.', 'the whole reply is read once');
+// Each line is its own block with its own direction, so an Arabic line runs right to left and an English one doesn't.
+{
+  const textBlock = capsule.querySelector('.nc-text');
+  assert.deepEqual(textBlock.children.map((c) => c.dir), ['auto'], 'a reply is a block with an automatic direction');
+  assert.ok(textBlock.children.every((c) => c.className === 'nc-line'));
+}
+R.notch.close(); flush();
+R.notch.text('English line\nمرحباً بك\n'); flush();
+{
+  const lines = capsule.querySelector('.nc-text').children;
+  assert.equal(lines.length, 3, 'one block per line');
+  assert.deepEqual(lines.map((c) => c.dir), ['auto', 'auto', 'auto']);
+  assert.deepEqual(lines.map((c) => c.textContent), ['English line', 'مرحباً بك', '\u200b'], 'an empty line keeps its height');
+}
 R.notch.close(); flush();
 R.notch.prompt('Run npm test?', ['Allow', "Don't allow"], noop);
 flush();
