@@ -504,14 +504,11 @@
   // Effort: how hard a model thinks before it answers. A model's `levels` are the thinking levels it supports (none: it
   // can't think). The stops are Off, then those levels; the automatic value ('') starts at the app default, 'low'.
   const EFFORT_NAMES = { off: 'Off', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra', max: 'Max', ultra: 'Ultra' };
-  const EFFORT_HINT = 'How hard it thinks before answering. Higher is slower and uses more of your limit.';
+  const EFFORT_HINT = 'Higher is smarter but slower.';
   const effortStops = (m) => (m?.levels?.length ? ['off', ...m.levels.filter((x) => x !== 'off')] : null);
-  const canThink = (v) => !!effortStops(findModel(v));
   // Where a slider starts: the slot's level when its model has it, else low, else the model's lowest level.
   const effortStart = (stops, v) => stops.indexOf(stops.includes(v) ? v : stops.includes('low') ? 'low' : stops[1]);
   const effortHint = () => el('p', { className: 'why wrap effort-hint', textContent: EFFORT_HINT });
-  // A group's hint, once, when one of its models has a slider.
-  const groupHint = (values) => (values.some(canThink) ? effortHint() : null);
   // The Effort slider for a slot ('default', a job kind, 'backup1' or 'backup2') running `value` ('provider:modelId').
   // Nothing when no model is chosen; a note when the model can't think. hint: show the explanation under it.
   function effortRow(slot, value, hint = false) {
@@ -579,18 +576,17 @@
     const on = !!h.on;
     return el('div', { className: 'group' },
       el('div', { className: 'ghead' }, el('h2', { textContent: 'Hybrid models' }),
-        el('p', { className: 'wrap', textContent: 'Keep a fast default model for chatting. Jobs below switch to the model you pick, then go back.' }),
+        el('p', { className: 'wrap', textContent: 'A different model for each kind of job.' }),
         on && h.active ? el('p', { className: 'why', role: 'status', textContent: `Using ${modelName(h.active)} for this job` }) : null),
-      toggle('Use hybrid models', 'Different models for different jobs, picked by what you ask. You can also name a model in a request ("use Opus for this").', on, () => act('hybrid'), 'hybrid'),
+      toggle('Use hybrid models', 'Or name one: "use Opus for this".', on, () => act('hybrid'), 'hybrid'),
       on ? el('div', { className: 'setting' },
         el('span', { id: 'lbl-heavyall' }, 'Set all jobs to'),
         modelSelect('Set all jobs to', 'heavyall', '', 'Choose…', (sel) => { if (sel.value) { act(`heavyall:${sel.value}`); sel.value = ''; } })) : null,
       on ? h.jobs.map((j) => el('div', { className: 'slot' },
         el('div', { className: 'setting' },
-          el('span', { id: `lbl-heavy-${j.kind}` }, j.label, el('small', { className: 'wrap', textContent: j.hint })),
+          el('span', { id: `lbl-heavy-${j.kind}` }, j.label),
           modelSelect(`${j.label} model`, `heavy_${j.kind}`, j.value, 'Default model', (sel) => act(`heavy_${j.kind}:${sel.value}`))),
-        j.value ? effortRow(j.kind, j.value) : null)) : null,
-      on ? groupHint(h.jobs.map((j) => j.value)) : null);
+        j.value ? effortRow(j.kind, j.value) : null)) : null);
   }
   // If a limit is reached: up to two backup models, tried in order when a model hits its limit. Shown once an account
   // is signed in. state.fallbacks.slots are the first and second backup ('' or 'provider:modelId').
@@ -611,13 +607,12 @@
       slots[i - 1] ? effortRow(`backup${i}`, slots[i - 1]) : null);
     return el('div', { className: 'group' },
       el('div', { className: 'ghead' }, el('h2', { textContent: 'If a limit is reached' }),
-        el('p', { className: 'wrap', textContent: 'Pick up to two backups, in order. When a model hits its limit I switch to the next one that is free, tell you, and go back when it resets.' }),
+        el('p', { className: 'wrap', textContent: 'Up to two, tried in order.' }),
         on ? limits : null,
         on && f.using ? el('p', { className: 'why', role: 'status', textContent: `Using ${modelName(f.using)} for now` }) : null),
-      toggle('Use backup models', 'When a model hits its limit or can\'t be used, switch to the next one that works, tell you, and go back when it\'s free.', on, () => act('backups'), 'backups'),
+      toggle('Use backup models', 'Switch when a model hits its limit.', on, () => act('backups'), 'backups'),
       on ? row(1, 'First backup') : null,
       on ? row(2, 'Second backup') : null,
-      on ? groupHint(slots) : null,
       on && chain ? el('p', { className: 'why wrap', textContent: chain }) : null);
   }
   // Subagents: specialists the chat hands background work to. Each runs on the model picked here; one with no model
@@ -628,17 +623,16 @@
     const on = !!sa.on, hybridOn = !!(state.hybrid && state.hybrid.on);
     return el('div', { className: 'group' },
       el('div', { className: 'ghead' }, el('h2', { textContent: 'Subagents' }),
-        el('p', { className: 'wrap', textContent: 'Specialists I can hand background work to, each on the model you pick. I write each one its own prompt from your words.' })),
-      toggle('Use subagents', 'I can start up to three at once for separate parts of a request. They work in the background and report back.', on, () => act('subagents'), 'subagents'),
+        el('p', { className: 'wrap', textContent: 'Specialists I hand background work to.' })),
+      toggle('Use subagents', 'Up to three at once. They report back.', on, () => act('subagents'), 'subagents'),
       on ? el('div', { className: 'setting' },
         el('span', { id: 'lbl-delegate' }, 'Hand off'),
         picks('Hand off', [['ask', 'When I ask'], ['auto', 'On its own too']], sa.delegate ?? 'ask', (x) => act(`delegate_${x}`), 'delegate')) : null,
-      on ? el('p', { className: 'why wrap', textContent: sa.delegate === 'auto' ? 'I also pass long or separate jobs to a specialist myself, and still do whenever you ask for an agent.' : 'I only hand work to a specialist when you ask for an agent or for work in the background.' }) : null,
+      on ? el('p', { className: 'why wrap', textContent: sa.delegate === 'auto' ? 'I also hand off long jobs myself.' : 'Only when you ask for an agent.' }) : null,
       on ? sa.crew.map((c) => el('div', { className: 'slot' },
         el('div', { className: 'setting' },
-          el('span', { id: `lbl-crew-${c.id}` }, c.label),
+          el('span', { id: `lbl-crew-${c.id}` }, c.label, el('small', { className: 'wrap', textContent: c.via === 'hybrid' ? `${c.hint} Uses ${modelName(c.uses)}.` : c.hint })),
           modelSelect(`${c.label} model`, `crew_${c.id}`, c.value, hybridOn ? 'Follow hybrid' : 'Off', (sel) => act(`crew_${c.id}:${sel.value}`))),
-        el('p', { className: 'why wrap', textContent: c.via === 'hybrid' ? `${c.hint} Using ${modelName(c.uses)} from hybrid models.` : c.hint }),
         c.value ? effortRow(`sub_${c.id}`, c.value) : null)) : null);
   }
   // A local server: connected (a lit dot) or not, its address if it was added, and why its models aren't in the
@@ -752,7 +746,7 @@
         local ? el('div', { className: 'reveal', 'data-anim': 'studio-speak' },
           el('p', { className: 'sub', textContent: 'How much it speaks' }),
           picks('How much it speaks', [['short', 'Short'], ['medium', 'Medium'], ['full', 'Everything']], state.voice?.studioSpeak ?? 'short', (x) => act(`studiospeak_${x}`), 'studiospeak'),
-          el('p', { className: 'why wrap', textContent: 'VoiceStudio renders slower than real time, so long answers take a while to say. Short speaks the first couple of sentences; the full answer is always shown as text.' })) : null,
+          el('p', { className: 'why wrap', textContent: 'VoiceStudio is slow. The full answer always shows as text.' })) : null,
         tts === 'gemini' && hasKey && state.geminiVoices?.length ? el('div', { className: 'reveal', 'data-anim': 'gemini-voice' },
           el('p', { className: 'sub', textContent: `Voice for ${state.name}` }),
           el('span', { className: 'px field select' },
@@ -797,14 +791,14 @@
   const SPEAK_LANGS = [['auto', 'Automatic (my Mac\'s languages)'], ['en-US', 'English'], ['ar-SA', 'العربية · Arabic'], ['he-IL', 'עברית · Hebrew'],
     ['es-ES', 'Español · Spanish'], ['fr-FR', 'Français · French'], ['de-DE', 'Deutsch · German'], ['it-IT', 'Italiano · Italian'],
     ['pt-BR', 'Português · Portuguese'], ['ja-JP', '日本語 · Japanese'], ['ko-KR', '한국어 · Korean'], ['zh-CN', '中文 · Chinese'], ['hi-IN', 'हिन्दी · Hindi']];
-  const SPEAK_ONLINE = 'Apple\'s online recognition is used for this language: audio goes to Apple\'s servers. To keep it on this Mac, add it under System Settings → Keyboard → Dictation → Languages. The first use asks for Speech Recognition access.';
+  const SPEAK_ONLINE = 'This language goes to Apple\'s servers. Add it under Dictation in System Settings to keep it on this Mac.';
   // The Speak in select, shown on a Mac while voice control is on, with the online hint under it when it applies.
   function speakPicker(v) {
     const lang = v.lang ?? 'auto';
     const online = v.langOnline === true || (['ar-SA', 'he-IL'].includes(lang) && v.langOnline == null);
     return el('div', { className: 'reveal', 'data-anim': 'speakin' },
       el('p', { className: 'sub', textContent: 'Speak in' }),
-      el('p', { className: 'why wrap', textContent: 'The language I listen for when you talk to me.' }),
+      el('p', { className: 'why wrap', textContent: 'The language you talk to me in.' }),
       el('span', { className: 'px field select' },
         el('select', { 'aria-label': 'Language I speak', 'data-k': 'speechlang', on: { change: (e) => act(`speechlang:${e.target.value}`) } },
           SPEAK_LANGS.map(([code, label]) => el('option', { value: code, textContent: label, dir: 'auto', selected: code === lang })))),
@@ -1189,16 +1183,16 @@
       fishModels: [{ id: 'drama-3', name: 'Drama 3', perM: 50, promo: { perM: 10, until: '2026-12-01T08:00:00Z' } }, { id: 's2.1-pro', name: 'S2.1 Pro', perM: 15 }],
       // Hybrid models: a job on a model picked here (the sidecar sends these; active is the one a heavy job is on right now).
       hybrid: { on: true, jobs: [
-        { kind: 'code', label: 'Coding, files and commands', hint: 'Editing files, running commands, scripts.', value: '' },
-        { kind: 'computer', label: 'Computer use', hint: 'Clicking and typing in other apps, reading windows and screenshots.', value: 'anthropic:claude-sonnet-5' },
-        { kind: 'web', label: 'Web research', hint: 'Searching and reading the web.', value: '' },
-        { kind: 'draw', label: 'Drawing and diagrams', hint: 'Cards, charts, diagrams and sketches on screen.', value: '' },
-        { kind: 'agents', label: 'Background agents', hint: 'Work I send an agent off to do.', value: '' } ], active: '' },
+        { kind: 'code', label: 'Coding and commands', value: '' },
+        { kind: 'computer', label: 'Computer use', value: 'anthropic:claude-sonnet-5' },
+        { kind: 'web', label: 'Web research', value: '' },
+        { kind: 'draw', label: 'Drawing', value: '' },
+        { kind: 'agents', label: 'Background agents', value: '' } ], active: '' },
       // Subagents: Scout has its own model, Builder follows hybrid's coding model (none set here, so it is off the crew).
       subagents: { on: true, delegate: 'auto', crew: [
-        { id: 'scout', label: 'Scout', hint: 'Finds things out on the web and writes notes.', value: 'gemini:gemini-3.8-flash', via: 'own', uses: 'gemini:gemini-3.8-flash' },
-        { id: 'builder', label: 'Builder', hint: 'Writes code, pages and scripts, and runs them.', value: '', via: 'hybrid', uses: 'anthropic:claude-sonnet-5' },
-        { id: 'writer', label: 'Writer', hint: 'Documents, slides, emails and copy.', value: '', via: '', uses: '' } ] },
+        { id: 'scout', label: 'Scout', hint: 'Web research.', value: 'gemini:gemini-3.8-flash', via: 'own', uses: 'gemini:gemini-3.8-flash' },
+        { id: 'builder', label: 'Builder', hint: 'Code, pages and scripts.', value: '', via: 'hybrid', uses: 'anthropic:claude-sonnet-5' },
+        { id: 'writer', label: 'Writer', hint: 'Documents, slides and copy.', value: '', via: '', uses: '' } ] },
       // If a limit is reached: backups 1 and 2 (the Gemini model is free while Claude is at its limit, so it's in use).
       fallbacks: { on: true, slots: ['gemini:gemini-3.8-flash', ''], limited: [{ label: 'Claude', until: at + 40 * 60e3 }], using: 'gemini:gemini-3.8-flash' },
       // Effort per slot: '' is automatic (low); computer use is set to High, and backup 1 (Gemini, which only thinks at High) too.

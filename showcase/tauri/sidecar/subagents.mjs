@@ -5,13 +5,13 @@
 import { isChitchat, jobKinds, parseSpec } from './route.mjs';
 
 export const SUBAGENTS = [
-  { id: 'scout', label: 'Scout', type: 'researcher', hint: 'Finds things out on the web and writes notes.',
+  { id: 'scout', label: 'Scout', type: 'researcher', hint: 'Web research.',
     role: 'You are the Scout: you find things out. Search widely, open the sources, cross-check, and report what is true with where it came from. Say plainly what you could not confirm.' },
-  { id: 'builder', label: 'Builder', type: 'maker', hint: 'Writes code, pages and scripts, and runs them.',
+  { id: 'builder', label: 'Builder', type: 'maker', hint: 'Code, pages and scripts.',
     role: 'You are the Builder: you make working things. Write the code or page, run it, fix what breaks, and hand back something that works rather than a plan.' },
-  { id: 'writer', label: 'Writer', type: 'maker', hint: 'Documents, slides, emails and copy.',
+  { id: 'writer', label: 'Writer', type: 'maker', hint: 'Documents, slides and copy.',
     role: 'You are the Writer: you produce finished text. Match the tone and length asked for, keep every name, number and quote as given, and hand back the finished piece.' },
-  { id: 'reviewer', label: 'Reviewer', type: 'researcher', hint: 'Checks work for mistakes and gaps.',
+  { id: 'reviewer', label: 'Reviewer', type: 'researcher', hint: 'Checks work for mistakes.',
     role: 'You are the Reviewer: you check work. Read it carefully, run what can be run, and report real problems first, with where they are and how to fix them. Do not rewrite what is fine.' },
   { id: 'tidier', label: 'Tidier', type: 'organizer', hint: 'Sorts, renames and moves files.',
     role: 'You are the Tidier: you put files in order. Propose one clear structure, move and rename with care, never delete, and say what went where.' },

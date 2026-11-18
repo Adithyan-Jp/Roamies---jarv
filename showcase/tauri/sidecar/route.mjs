@@ -8,11 +8,11 @@ import { wantsAgent } from './agents.mjs';
 // The kinds of job, in the order they're checked: the first with a model set (and runnable) wins. Computer use first
 // (clicking needs the strongest model), then code, background agents, drawing and web research.
 export const JOB_KINDS = [
-  { kind: 'computer', label: 'Computer use', hint: 'Clicking and typing in other apps, reading windows and screenshots.' },
-  { kind: 'code', label: 'Coding, files and commands', hint: 'Editing files, running commands and scripts.' },
-  { kind: 'agents', label: 'Background agents', hint: 'Work I send an agent off to do.' },
-  { kind: 'draw', label: 'Drawing and diagrams', hint: 'Cards, charts, diagrams and sketches on screen.' },
-  { kind: 'web', label: 'Web research', hint: 'Searching and reading the web.' },
+  { kind: 'computer', label: 'Computer use' },
+  { kind: 'code', label: 'Coding and commands' },
+  { kind: 'agents', label: 'Background agents' },
+  { kind: 'draw', label: 'Drawing' },
+  { kind: 'web', label: 'Web research' },
 ];
 export const KINDS = JOB_KINDS.map((j) => j.kind);
 

@@ -44,7 +44,8 @@
    outline is the ring forced-colours modes draw instead. */
 .ab-in .ab-text:focus-visible { outline: 2px solid transparent; outline-offset: 0; }
 .ab-in .ab-text::placeholder { color: var(--ink-3); opacity: 1; }
-.ab-in .ab-text:dir(rtl) { font-family: "Roamies Arabic RTL", "Martian Mono", "Roamies Arabic", ui-monospace, Menlo, monospace; }
+/* 12.5px, as in the capsule: at 13.5px the dots under a final ي fall outside the 18px line and are cut off. */
+.ab-in .ab-text:dir(rtl) { font-size: 12.5px; font-family: "Roamies Arabic RTL", "Martian Mono", "Roamies Arabic", ui-monospace, Menlo, monospace; }
 .ab-in .ab-text::selection { background: #1f5f58; color: #e8fffa; }
 /* Waiting with something typed while you're in another app. */
 .ab.away { background: var(--line-hi); color: #e8fffa; }

@@ -25,10 +25,10 @@ assert.equal(withWords('Use blue', 'Ken', 'make it blue'), 'Use blue\n\nKen\'s e
 assert.equal(withWords('Do "make it blue" now', 'Ken', 'make it blue'), 'Do "make it blue" now');
 
 // The note for a model taking a job over
-const note = handoffNote({ userName: 'Ken', assistant: 'JARVIS', from: 'Claude Haiku 5.5', kind: 'Coding, files and commands', words: 'fix the login bug in app.js' });
+const note = handoffNote({ userName: 'Ken', assistant: 'JARVIS', from: 'Claude Haiku 5.5', kind: 'Coding and commands', words: 'fix the login bug in app.js' });
 assert.match(note, /^\(Handoff, not from Ken:/);
 assert.match(note, /Claude Haiku 5\.5 was chatting with them as JARVIS/);
-assert.match(note, /passed this Coding, files and commands job to you/);
+assert.match(note, /passed this Coding and commands job to you/);
 assert.match(note, /exact words, quoted verbatim: “fix the login bug in app\.js”/);
 assert.match(note, /don't reword it/);
 assert.doesNotMatch(handoffNote({ userName: 'Ken', assistant: 'JARVIS', from: 'x', kind: 'y', words: '' }), /exact words/);
