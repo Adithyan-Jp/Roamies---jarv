@@ -1,7 +1,7 @@
 {
   "updates": [
     {
-      "version": null,
+      "version": "0.1.42",
       "date": "2026-11-18",
       "items": [
         { "kind": "new", "title": "Meet Ultren", "text": "A chrome machine with glowing eyes and a grand, dark wit. Try him in Appearance." },
