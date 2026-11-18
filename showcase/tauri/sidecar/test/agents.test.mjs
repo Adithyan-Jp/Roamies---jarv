@@ -430,4 +430,78 @@ assert.match(agentSystem('maker', { dir: '/x', returns: 'answer' }), /report is 
   assert.equal(await failing[1].execute({}), 'drawn', 'a launch that failed holds nothing back');
 }
 
+// Handoffs carry the user's exact words: into the agent's brief, into steering, and back in the news.
+{
+  const home = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'roamies-agentwords-')));
+  const children = [];
+  const fork = () => { const c = new EventEmitter(); Object.assign(c, { sent: [], connected: true, send(m) { c.sent.push(m); }, kill() {} }); children.push(c); return c; };
+  let said = 'Build me a page for Woof Co. Keep "Woof & Co" in caps, blue, 3 sections';
+  const config = {
+    model: async () => ({ provider: 'anthropic', model: 'm1', route: 'api' }), creds: async () => ({}), allowActions: () => true, userWords: () => said,
+    image: () => null, open: async () => {}, reveal: async () => {},
+  };
+  const openRule = (p, h, o) => checkOpen(String(p).replace(home, '/Users/ken'), '/Users/ken', o);
+  const mgr = createAgents({ fork, ui: () => {}, config, root: path.join(home, 'Roamies'), userName: 'Ken', runner: '/x/agentrun.mjs', safety: { checkRead, checkWrite, checkOpen: openRule, checkLink }, home, now: () => 1 });
+  const a = await mgr.start({ type: 'maker', title: 'Woof page', brief: 'A landing page for a dog brand, uppercase name, blue theme.' });
+  const text = children[0].sent[0].content;
+  assert.match(text, /^Ken's exact words, quoted verbatim\./, 'their words open the brief');
+  assert.ok(text.includes('“Build me a page for Woof Co. Keep "Woof & Co" in caps, blue, 3 sections”'), 'verbatim, quotes and all');
+  assert.ok(text.indexOf('exact words') < text.indexOf("Brief from Ken's assistant"), 'then the assistant\'s reading');
+  assert.match(text, /A landing page for a dog brand/);
+  assert.equal(mgr.get(a.id).request, said, 'remembered on the agent');
+  // Steering a working agent: their words from this turn ride along
+  said = 'actually make the headline bigger';
+  await mgr.steer(a.id, 'Enlarge the heading');
+  assert.equal(children[0].sent.at(-1).text, 'Enlarge the heading\n\nKen\'s exact words: “actually make the headline bigger”');
+  // No words (a system turn): the brief is as before
+  said = '';
+  const b = await mgr.start({ type: 'maker', title: 'Plain', brief: 'Make a thing.' });
+  assert.equal(children[1].sent[0].content, 'Brief from Ken:\nMake a thing.');
+  assert.equal(mgr.get(b.id).request, undefined);
+  // The news quotes what was asked
+  children[0].emit('message', { t: 'finish', result: { outcome: 'Made the page', files: [], report: null } });
+  children[0].emit('message', { t: 'end', ok: true }); children[0].emit('close', 0, null);
+  await new Promise((r) => setTimeout(r, 400));
+  const items = agentNews(mgr.list());
+  assert.equal(items[0].asked, 'Build me a page for Woof Co. Keep "Woof & Co" in caps, blue, 3 sections', 'what it was first asked, not a later nudge');
+  assert.ok(newsText(items, 'Ken').includes('Ken asked, in their words: “Build me a page for Woof Co. Keep "Woof & Co" in caps, blue, 3 sections”'));
+  assert.ok(liveAgentsText(mgr.list(), { now: 2, userName: 'Ken' }).includes('asked: “Build me a page for Woof Co.'));
+}
+
+// Subagents: a specialist's role, type and model go into the launch; a continued run stays with it.
+{
+  const home = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'roamies-subagent-')));
+  const children = [], asked = [];
+  const fork = () => { const c = new EventEmitter(); Object.assign(c, { sent: [], connected: true, send(m) { c.sent.push(m); }, kill() {} }); children.push(c); return c; };
+  let crewOn = true;
+  const config = {
+    model: async (o) => { asked.push(o); return { provider: 'gemini', model: 'g1', route: 'api' }; }, creds: async () => ({}), allowActions: () => true, userWords: () => 'find me dentist chairs',
+    subagent: (n) => (crewOn && /scout/i.test(n) ? { id: 'scout', label: 'Scout', type: 'researcher', role: 'You are the Scout: you find things out.', spec: 'gemini:g1', slot: 'sub_scout' } : null),
+    image: () => null, open: async () => {}, reveal: async () => {},
+  };
+  const openRule = (p, h, o) => checkOpen(String(p).replace(home, '/Users/ken'), '/Users/ken', o);
+  const mgr = createAgents({ fork, ui: () => {}, config, root: path.join(home, 'Roamies'), userName: 'Ken', runner: '/x/agentrun.mjs', safety: { checkRead, checkWrite, checkOpen: openRule, checkLink }, home, now: () => 1 });
+  const a = await mgr.start({ subagent: 'scout', title: 'Chairs', brief: 'Compare three dentist chairs.' });
+  assert.equal(a.type, 'researcher', 'its type, without the chat naming one');
+  assert.deepEqual(asked[0], { spec: 'gemini:g1', slot: 'sub_scout' }, 'its own model and effort slot');
+  const text = children[0].sent[0].content;
+  assert.ok(text.startsWith("Ken's exact words"), 'their words still open the brief');
+  assert.ok(text.includes("Brief from Ken's assistant:\nYou are the Scout: you find things out.\n\nCompare three dentist chairs."), 'then its role, then the prompt');
+  assert.ok(liveAgentsText(mgr.list(), { now: 2, userName: 'Ken' }).includes('(Scout subagent, researcher'));
+  // Not on the crew: refused, so the chat doesn't think it launched
+  await assert.rejects(mgr.start({ subagent: 'writer', title: 'x', brief: 'y' }), /no subagent "writer"/i);
+  // A continued run stays with its specialist; if the crew is gone it carries on as an ordinary agent
+  children[0].emit('message', { t: 'finish', result: { outcome: 'Done', files: [], report: 'r' } });
+  children[0].emit('message', { t: 'end', ok: true }); children[0].emit('close', 0, null);
+  await new Promise((r) => setTimeout(r, 400));
+  await mgr.start({ continue: a.id, type: 'researcher', title: 'Chairs', brief: 'Now compare prices.' });
+  assert.deepEqual(asked[1], { spec: 'gemini:g1', slot: 'sub_scout' });
+  children[1].emit('message', { t: 'finish', result: { outcome: 'Done', files: [], report: 'r' } });
+  children[1].emit('message', { t: 'end', ok: true }); children[1].emit('close', 0, null);
+  await new Promise((r) => setTimeout(r, 400));
+  crewOn = false;
+  await mgr.start({ continue: a.id, type: 'researcher', title: 'Chairs', brief: 'And reviews.' });
+  assert.equal(asked[2], undefined);
+}
+
 console.log('agents tests: passed');

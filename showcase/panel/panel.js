@@ -104,7 +104,7 @@
     el('div', { className: 'ghead' }, el('h2', {}, title, n != null ? el('span', { className: 'n', textContent: String(n) }) : null), desc ? el('p', { textContent: desc }) : null),
     ...kids);
   const toggle = (label, hint, on, onflip, k) => el('div', { className: 'setting' },
-    el('span', { id: `lbl-${k}` }, label, hint ? el('small', { textContent: hint }) : null),
+    el('span', { id: `lbl-${k}` }, label, hint ? el('small', { textContent: hint, className: hint.length > 52 ? 'wrap' : '' }) : null), // a long hint wraps instead of running off the row
     el('button', { className: 'px switch', type: 'button', role: 'switch', 'aria-checked': String(!!on), 'aria-labelledby': `lbl-${k}`, 'data-k': k, on: { click: onflip } }));
   // tips: { value: text } shown in a tooltip on hover or keyboard focus, and read out as the option's description.
   const picks = (label, list, value, pick, k, tips = null) => el('div', { className: 'picks', role: 'radiogroup', 'aria-label': label },
@@ -487,13 +487,61 @@
 
   // Settings, one page per concern.
   const SIZE_TIPS = { default: 'My full size.', small: 'Half my size, so I take less of your screen.', cursor: 'I become a little arrow pointer, like your cursor.' };
+  // The runnable models, one optgroup per signed-in provider, values 'provider:modelId'; `current` is the selected one ('' for none).
+  const modelOptgroups = (current) => state.providers.filter((p) => p.on).map((p) => el('optgroup', { label: p.label },
+    p.models.map((m) => el('option', { value: `${p.id}:${m.id}`, textContent: m.name, selected: `${p.id}:${m.id}` === current }))));
+  // The model a 'provider:modelId' names (undefined when it isn't listed), and its display name (the raw id when it isn't).
+  const findModel = (v) => {
+    const i = v.indexOf(':');
+    return i < 0 ? undefined : state.providers.find((p) => p.id === v.slice(0, i))?.models.find((x) => x.id === v.slice(i + 1));
+  };
+  const modelName = (v) => findModel(v)?.name ?? v;
+  // A model select with a first option `first` (value ''), for the value `current`; onpick gets the select element.
+  const modelSelect = (aria, k, current, first, onpick) => el('span', { className: 'px field select' },
+    el('select', { 'aria-label': aria, 'data-k': k, on: { change: (e) => onpick(e.target) } },
+      el('option', { value: '', textContent: first, selected: !current }),
+      modelOptgroups(current)));
+  // Effort: how hard a model thinks before it answers. A model's `levels` are the thinking levels it supports (none: it
+  // can't think). The stops are Off, then those levels; the automatic value ('') starts at the app default, 'low'.
+  const EFFORT_NAMES = { off: 'Off', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra', max: 'Max', ultra: 'Ultra' };
+  const EFFORT_HINT = 'How hard it thinks before answering. Higher is slower and uses more of your limit.';
+  const effortStops = (m) => (m?.levels?.length ? ['off', ...m.levels.filter((x) => x !== 'off')] : null);
+  const canThink = (v) => !!effortStops(findModel(v));
+  // Where a slider starts: the slot's level when its model has it, else low, else the model's lowest level.
+  const effortStart = (stops, v) => stops.indexOf(stops.includes(v) ? v : stops.includes('low') ? 'low' : stops[1]);
+  const effortHint = () => el('p', { className: 'why wrap effort-hint', textContent: EFFORT_HINT });
+  // A group's hint, once, when one of its models has a slider.
+  const groupHint = (values) => (values.some(canThink) ? effortHint() : null);
+  // The Effort slider for a slot ('default', a job kind, 'backup1' or 'backup2') running `value` ('provider:modelId').
+  // Nothing when no model is chosen; a note when the model can't think. hint: show the explanation under it.
+  function effortRow(slot, value, hint = false) {
+    const m = findModel(value);
+    if (!m) return null;
+    const stops = effortStops(m);
+    if (!stops) return el('p', { className: 'effort-none', textContent: "This model doesn't think." });
+    const ticks = el('div', { className: 'effort-ticks', 'aria-hidden': 'true' }, stops.map((s) => el('span', { textContent: EFFORT_NAMES[s] ?? s })));
+    ticks.style.setProperty('--n', stops.length);
+    // Moving the thumb (input) highlights its stop; letting go (change) sends it.
+    const show = (i) => {
+      range.style.setProperty('--p', i / (stops.length - 1));
+      range.setAttribute('aria-valuetext', EFFORT_NAMES[stops[i]] ?? stops[i]);
+      [...ticks.children].forEach((t, j) => t.classList.toggle('on', j === i));
+    };
+    const range = el('input', {
+      type: 'range', className: 'effort-range', min: 0, max: stops.length - 1, step: 1, value: effortStart(stops, state.efforts?.[slot] ?? ''),
+      'data-k': `effort_${slot}`, 'aria-label': `Effort for ${m.name}`,
+      on: { input: (e) => show(Number(e.target.value)), change: (e) => act(`effort_${slot}:${stops[Number(e.target.value)]}`) },
+    });
+    show(Number(range.value));
+    return el('div', { className: 'effort' }, el('span', { className: 'effort-lbl', textContent: 'Effort' }), range, ticks, hint ? effortHint() : null);
+  }
   function modelPage() {
     const on = state.providers.filter((p) => p.on);
     const model = state.model ? `${state.model.provider}:${state.model.id}` : '';
     const select = on.length ? el('span', { className: 'px field select' },
       el('select', { 'aria-label': 'Model', 'data-k': 'model', on: { change: (e) => act(`model:${e.target.value}`) } },
         model ? null : el('option', { value: '', textContent: 'Pick a model', disabled: true, selected: true }),
-        on.map((p) => el('optgroup', { label: p.label }, p.models.map((m) => el('option', { value: `${p.id}:${m.id}`, textContent: m.name, selected: `${p.id}:${m.id}` === model })))))) : null;
+        modelOptgroups(model))) : null;
     // The accounts, then each local server (Ollama, LM Studio, the ones added) and the Add a server row.
     const servers = state.localServers ?? [];
     if (ui.addSent != null && servers.length > ui.addSent) { ui.addSent = null; ui.add = { label: '', url: '', key: '', images: false }; if (ui.key === ADD) ui.key = null; }
@@ -513,10 +561,85 @@
     return [
       group('Model', 'Which AI answers you.', null,
         select ?? el('p', { className: 'empty', textContent: 'Sign in to an account below first.' }),
+        effortRow('default', model, true),
         toggle('Lite mode', 'For small or local models. Fewer features.', state.lite, () => act('lite'), 'lite')),
-      el('div', { className: 'group paged' }, el('div', { className: 'ghead' }, el('h2', { textContent: 'Accounts' }), el('p', { textContent: 'Sign in to use their models.' })), box),
+      hybridGroup(),
+      subagentGroup(),
+      fallbackGroup(),
+      el('div', { className: 'group paged' },el('div', { className: 'ghead' }, el('h2', { textContent: 'Accounts' }), el('p', { textContent: 'Sign in to use their models.' })), box),
       foot(null, nav),
     ];
+  }
+  // Hybrid models: a fast default for chatting, and the jobs that switch to a model picked here, then back. Shown once
+  // an account is signed in. Each job's value is '' (the default model) or 'provider:modelId'.
+  function hybridGroup() {
+    const h = state.hybrid;
+    if (!h || !state.providers.some((p) => p.on)) return null;
+    // The master switch: off leaves only the title, description and switch; on shows the job rows as well.
+    const on = !!h.on;
+    return el('div', { className: 'group' },
+      el('div', { className: 'ghead' }, el('h2', { textContent: 'Hybrid models' }),
+        el('p', { className: 'wrap', textContent: 'Keep a fast default model for chatting. Jobs below switch to the model you pick, then go back.' }),
+        on && h.active ? el('p', { className: 'why', role: 'status', textContent: `Using ${modelName(h.active)} for this job` }) : null),
+      toggle('Use hybrid models', 'Different models for different jobs, picked by what you ask. You can also name a model in a request ("use Opus for this").', on, () => act('hybrid'), 'hybrid'),
+      on ? el('div', { className: 'setting' },
+        el('span', { id: 'lbl-heavyall' }, 'Set all jobs to'),
+        modelSelect('Set all jobs to', 'heavyall', '', 'Choose…', (sel) => { if (sel.value) { act(`heavyall:${sel.value}`); sel.value = ''; } })) : null,
+      on ? h.jobs.map((j) => el('div', { className: 'slot' },
+        el('div', { className: 'setting' },
+          el('span', { id: `lbl-heavy-${j.kind}` }, j.label, el('small', { className: 'wrap', textContent: j.hint })),
+          modelSelect(`${j.label} model`, `heavy_${j.kind}`, j.value, 'Default model', (sel) => act(`heavy_${j.kind}:${sel.value}`))),
+        j.value ? effortRow(j.kind, j.value) : null)) : null,
+      on ? groupHint(h.jobs.map((j) => j.value)) : null);
+  }
+  // If a limit is reached: up to two backup models, tried in order when a model hits its limit. Shown once an account
+  // is signed in. state.fallbacks.slots are the first and second backup ('' or 'provider:modelId').
+  function fallbackGroup() {
+    const f = state.fallbacks;
+    if (!f || !state.providers.some((p) => p.on)) return null;
+    // The master switch: off leaves only the title, description and switch; on shows the backups and their status.
+    const on = !!f.on;
+    const slots = f.slots ?? ['', ''];
+    const limits = (f.limited ?? []).map((x) => el('p', { className: 'why', role: 'status', textContent: x.until
+      ? `${x.label} is at its limit until ${new Date(x.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+      : `${x.label} is at its limit; I'll try it again soon` }));
+    const chain = state.model && slots.some(Boolean) ? `Order: ${[state.model.name, ...slots.filter(Boolean).map(modelName)].join(' → ')}` : null;
+    const row = (i, label) => el('div', { className: 'slot' },
+      el('div', { className: 'setting' },
+        el('span', { id: `lbl-fallback-${i}` }, label),
+        modelSelect(label, `fallback_${i}`, slots[i - 1] ?? '', 'None', (sel) => act(`fallback_${i}:${sel.value}`))),
+      slots[i - 1] ? effortRow(`backup${i}`, slots[i - 1]) : null);
+    return el('div', { className: 'group' },
+      el('div', { className: 'ghead' }, el('h2', { textContent: 'If a limit is reached' }),
+        el('p', { className: 'wrap', textContent: 'Pick up to two backups, in order. When a model hits its limit I switch to the next one that is free, tell you, and go back when it resets.' }),
+        on ? limits : null,
+        on && f.using ? el('p', { className: 'why', role: 'status', textContent: `Using ${modelName(f.using)} for now` }) : null),
+      toggle('Use backup models', 'When a model hits its limit or can\'t be used, switch to the next one that works, tell you, and go back when it\'s free.', on, () => act('backups'), 'backups'),
+      on ? row(1, 'First backup') : null,
+      on ? row(2, 'Second backup') : null,
+      on ? groupHint(slots) : null,
+      on && chain ? el('p', { className: 'why wrap', textContent: chain }) : null);
+  }
+  // Subagents: specialists the chat hands background work to. Each runs on the model picked here; one with no model
+  // follows the model hybrid models set for its kind of job (when those are on), else it is not on the crew.
+  function subagentGroup() {
+    const sa = state.subagents;
+    if (!sa || !state.providers.some((p) => p.on)) return null;
+    const on = !!sa.on, hybridOn = !!(state.hybrid && state.hybrid.on);
+    return el('div', { className: 'group' },
+      el('div', { className: 'ghead' }, el('h2', { textContent: 'Subagents' }),
+        el('p', { className: 'wrap', textContent: 'Specialists I can hand background work to, each on the model you pick. I write each one its own prompt from your words.' })),
+      toggle('Use subagents', 'I can start up to three at once for separate parts of a request. They work in the background and report back.', on, () => act('subagents'), 'subagents'),
+      on ? el('div', { className: 'setting' },
+        el('span', { id: 'lbl-delegate' }, 'Hand off'),
+        picks('Hand off', [['ask', 'When I ask'], ['auto', 'On its own too']], sa.delegate ?? 'ask', (x) => act(`delegate_${x}`), 'delegate')) : null,
+      on ? el('p', { className: 'why wrap', textContent: sa.delegate === 'auto' ? 'I also pass long or separate jobs to a specialist myself, and still do whenever you ask for an agent.' : 'I only hand work to a specialist when you ask for an agent or for work in the background.' }) : null,
+      on ? sa.crew.map((c) => el('div', { className: 'slot' },
+        el('div', { className: 'setting' },
+          el('span', { id: `lbl-crew-${c.id}` }, c.label),
+          modelSelect(`${c.label} model`, `crew_${c.id}`, c.value, hybridOn ? 'Follow hybrid' : 'Off', (sel) => act(`crew_${c.id}:${sel.value}`))),
+        el('p', { className: 'why wrap', textContent: c.via === 'hybrid' ? `${c.hint} Using ${modelName(c.uses)} from hybrid models.` : c.hint }),
+        c.value ? effortRow(`sub_${c.id}`, c.value) : null)) : null);
   }
   // A local server: connected (a lit dot) or not, its address if it was added, and why its models aren't in the
   // Model menu (not running, or none can see images). Ollama and LM Studio disconnect; added ones are removed.
@@ -863,7 +986,9 @@
     const pane = $(`pane-${tab}`);
     const same = render.tab === tab; render.tab = tab;
     const before = new Set([...pane.querySelectorAll('[data-anim]')].filter(shown).map((n) => n.dataset.anim));
-    const draw = () => { pane.replaceChildren(...PANES[tab]().flat().filter(Boolean)); pane.classList.toggle('paged', !!pane.querySelector('.pagebox')); };
+    const draw = () => { pane.replaceChildren(...PANES[tab]().flat().filter(Boolean)); // The Model page is taller than the window (the default model, hybrid models, backups, then the accounts): it scrolls as a whole,
+    // its accounts list at its natural size. The other pages with a list fit it to the room left and page it instead.
+    pane.classList.toggle('paged', tab !== 'model' && !!pane.querySelector('.pagebox')); };
     draw();
     // Lists show as many rows as fit: drawn once to measure, again if a different number fits.
     if (fit()) draw();
@@ -1019,18 +1144,19 @@
   function preview() {
     document.title = 'Roamies panel (preview with sample data)';
     const at = Date.now(), q = new URLSearchParams(location.search);
+    const CLAUDE_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
     const s = {
       version: '0.9.0', os: /Win/.test(navigator.platform) ? 'win' : 'mac',
       status: { state: 'ready', text: 'Ready' }, busy: false, canNew: true,
       model: { provider: 'anthropic', id: 'claude-haiku-5-5', name: 'Claude Haiku 5.5', providerLabel: 'Anthropic' },
       providers: [
-        { id: 'anthropic', label: 'Anthropic', on: true, method: 'oauth', key: true, signedIn: true, models: [{ id: 'claude-haiku-5-5', name: 'Claude Haiku 5.5' }, { id: 'claude-sonnet-5', name: 'Claude Sonnet 5' }] },
+        { id: 'anthropic', label: 'Anthropic', on: true, method: 'oauth', key: true, signedIn: true, models: [{ id: 'claude-haiku-5-5', name: 'Claude Haiku 5.5', levels: CLAUDE_LEVELS }, { id: 'claude-sonnet-5', name: 'Claude Sonnet 5', levels: CLAUDE_LEVELS }] },
         { id: 'openai', label: 'OpenAI', on: false, method: 'oauth', key: true, models: [] },
-        { id: 'gemini', label: 'Gemini', on: true, method: 'key', key: true, keySaved: true, models: [{ id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash' }] },
+        { id: 'gemini', label: 'Gemini', on: true, method: 'key', key: true, keySaved: true, models: [{ id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', levels: ['high'] }] },
         { id: 'moonshot', label: 'Kimi (Moonshot)', on: false, method: 'key', models: [], kinds: [
           { id: 'kimi-code', label: 'Kimi Code', billing: 'Uses your Kimi Code plan. Create the key in the Kimi Code Console.' },
           { id: 'moonshot', label: 'Moonshot', billing: 'Pay-per-token from platform.moonshot.ai.' }] },
-        { id: 'local', label: 'Local models', on: q.has('local'), method: 'local', models: q.has('local') ? [{ id: 'local/ollama/qwen3-vl:8b', name: 'qwen3-vl:8b (Ollama)' }] : [] },
+        { id: 'local', label: 'Local models', on: q.has('local'), method: 'local', models: q.has('local') ? [{ id: 'local/ollama/qwen3-vl:8b', name: 'qwen3-vl:8b (Ollama)', levels: [] }] : [] },
         ...['xAI', 'GLM (Z.ai)', 'MiniMax', 'Xiaomi', 'DeepSeek', 'Sakana', 'OpenRouter', 'Hugging Face'].map((label) => ({ id: label.toLowerCase().replace(/\W/g, ''), label, on: false, method: 'key', models: [] })),
       ],
       // ?local: Ollama connected, LM Studio not running, and an added server whose models can't see images.
@@ -1061,6 +1187,22 @@
       geminiShared: new URLSearchParams(location.search).has('shared'), geminiModel: 'gemini-3.8-flash-lite-tts',
       geminiModels: [{ id: 'gemini-3.8-flash-lite-tts', name: 'Flash Lite', per10s: 0.0015 }, { id: 'gemini-3.8-flash-tts', name: 'Flash', per10s: 0.00225 }],
       fishModels: [{ id: 'drama-3', name: 'Drama 3', perM: 50, promo: { perM: 10, until: '2026-12-01T08:00:00Z' } }, { id: 's2.1-pro', name: 'S2.1 Pro', perM: 15 }],
+      // Hybrid models: a job on a model picked here (the sidecar sends these; active is the one a heavy job is on right now).
+      hybrid: { on: true, jobs: [
+        { kind: 'code', label: 'Coding, files and commands', hint: 'Editing files, running commands, scripts.', value: '' },
+        { kind: 'computer', label: 'Computer use', hint: 'Clicking and typing in other apps, reading windows and screenshots.', value: 'anthropic:claude-sonnet-5' },
+        { kind: 'web', label: 'Web research', hint: 'Searching and reading the web.', value: '' },
+        { kind: 'draw', label: 'Drawing and diagrams', hint: 'Cards, charts, diagrams and sketches on screen.', value: '' },
+        { kind: 'agents', label: 'Background agents', hint: 'Work I send an agent off to do.', value: '' } ], active: '' },
+      // Subagents: Scout has its own model, Builder follows hybrid's coding model (none set here, so it is off the crew).
+      subagents: { on: true, delegate: 'auto', crew: [
+        { id: 'scout', label: 'Scout', hint: 'Finds things out on the web and writes notes.', value: 'gemini:gemini-3.8-flash', via: 'own', uses: 'gemini:gemini-3.8-flash' },
+        { id: 'builder', label: 'Builder', hint: 'Writes code, pages and scripts, and runs them.', value: '', via: 'hybrid', uses: 'anthropic:claude-sonnet-5' },
+        { id: 'writer', label: 'Writer', hint: 'Documents, slides, emails and copy.', value: '', via: '', uses: '' } ] },
+      // If a limit is reached: backups 1 and 2 (the Gemini model is free while Claude is at its limit, so it's in use).
+      fallbacks: { on: true, slots: ['gemini:gemini-3.8-flash', ''], limited: [{ label: 'Claude', until: at + 40 * 60e3 }], using: 'gemini:gemini-3.8-flash' },
+      // Effort per slot: '' is automatic (low); computer use is set to High, and backup 1 (Gemini, which only thinks at High) too.
+      efforts: { default: '', computer: 'high', code: '', agents: '', draw: '', web: '', backup1: 'high', backup2: '' },
       voice: { on: true, keys: '⌃⌥', ready: true, mac: true, lang: 'auto', langOnline: null, studioSpeak: 'short', mute: true, autoListen: q.has('listen'), listenEvery: false, listenSecs: 8, listenChoices: [3, 5, 8, 10, 15], mics: [{ id: 'BuiltIn', name: 'MacBook Pro Microphone' }, { id: 'airpods', name: 'AirPods Pro' }], mic: '', micAuto: 'MacBook Pro Microphone', wakeWord: false, wakeName: 'Roamies', download: null }, askKeys: '⌥⌘', brief: { on: true, todoist: false, canTodoist: true }, focus: { until: null, task: '', list: ['YouTube', 'Reddit', 'X', 'Steam', 'Netflix'], custom: false }, sync: { dir: '', at: null, error: null, paused: false }, shortcuts: { talk: { value: 'control+option', pairs: [['control+option', 'Control+Option'], ['option+command', 'Option+Command'], ['control+command', 'Control+Command'], ['control+shift', 'Control+Shift'], ['option+shift', 'Option+Shift']] }, keys: [{ id: 'summon', words: 'Control+Option+S' }, { id: 'snap', words: 'Control+Option+A' }, { id: 'list', words: 'Control+Option+L' }] }, writeKeys: { value: 'option+command', pairs: [['option+command', 'Option+Command'], ['control+command', 'Control+Command'], ['control+shift', 'Control+Shift'], ['option+shift', 'Option+Shift']] },
       sound: true, notch: q.has('notch') ? 'drop' : null, actions: false, skipAllow: false, login: { on: true },
       update: { available: new URLSearchParams(location.search).has('update') && new URLSearchParams(location.search).get('update') !== 'failed' ? '0.9.1' : null, installing: false, checking: false, result: null },
@@ -1104,6 +1246,9 @@
       if (id.startsWith('tts:')) { s.tts = id.slice(4); s.studio = s.tts === 'voicestudio' ? STUDIO[q.get('studio')] ?? STUDIO.on : null; setTimeout(() => window.__panel({ kind: 'state', state: s }), 120); }
       if (id.startsWith('studiovoice:') && s.studio) { s.studio.voice = id.slice(12) === 'default' ? null : id.slice(12); setTimeout(() => window.__panel({ kind: 'state', state: s }), 120); }
       if (id === 'lite') { s.lite = !s.lite; setTimeout(() => window.__panel({ kind: 'state', state: s }), 120); }
+      if (id === 'hybrid') { s.hybrid.on = !s.hybrid.on; setTimeout(() => window.__panel({ kind: 'state', state: s }), 120); }
+      if (id === 'backups') { s.fallbacks.on = !s.fallbacks.on; setTimeout(() => window.__panel({ kind: 'state', state: s }), 120); }
+      if (id.startsWith('effort_')) { const at = id.indexOf(':'); s.efforts[id.slice(7, at)] = id.slice(at + 1); setTimeout(() => window.__panel({ kind: 'state', state: s }), 120); }
       if (s.voice && ['autolisten', 'listenevery'].includes(id)) { const k = id === 'autolisten' ? 'autoListen' : 'listenEvery'; s.voice[k] = !s.voice[k]; setTimeout(() => window.__panel({ kind: 'state', state: s }), 120); }
       if (s.voice && id.startsWith('speechlang:')) { s.voice.lang = id.slice(11); s.voice.langOnline = ['ar-SA', 'he-IL'].includes(s.voice.lang) ? true : null; setTimeout(() => window.__panel({ kind: 'state', state: s }), 120); }
       if (s.voice && id.startsWith('listensecs:')) { s.voice.listenSecs = Number(id.slice(11)); setTimeout(() => window.__panel({ kind: 'state', state: s }), 120); }

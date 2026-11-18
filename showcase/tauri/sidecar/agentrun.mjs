@@ -42,7 +42,7 @@ function steer(text) {
 process.on('message', (m) => {
   if (m?.t === 'start' && !started) { started = true; run(m).catch((e) => end(false, String(e?.message ?? e).slice(0, 300))); }
   else if (m?.t === 'reply') { const r = waiting.get(m.id); waiting.delete(m.id); r?.(m.value ?? null); }
-  else if (m?.t === 'steer' && typeof m.text === 'string') steer(m.text.slice(0, 2000));
+  else if (m?.t === 'steer' && typeof m.text === 'string') steer(m.text.slice(0, 4000));
   else if (m?.t === 'allow') allow = !!m.on;
 });
 

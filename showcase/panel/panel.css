@@ -140,6 +140,8 @@ html, body { height: 100%; background: transparent; }
 .pane { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: var(--group); padding: 12px 0 var(--gut); }
 .pane.paged { padding-bottom: 0; }
 .pane:not(.paged) { overflow-y: auto; margin-inline-end: calc(-1 * var(--gut)); padding-inline-end: var(--gut); }
+/* In a page that scrolls, a list keeps the height its rows need instead of shrinking to the room that is left. */
+.pane:not(.paged) .group.paged, .pane:not(.paged) .pagebox { flex: none; }
 .pane[hidden] { display: none; }
 /* A paged list takes the room left and shows as many rows as fit there (panel.js measures). */
 .group.paged { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -180,6 +182,7 @@ html, body { height: 100%; background: transparent; }
 .ghead h2 .n { font-weight: 500; color: var(--ink-3); }
 /* A description reads at the same size as the rows under it; it's quieter by colour, not by size. */
 .ghead p { margin: 0; font-size: var(--t-body); line-height: 1.4; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ghead p.wrap { white-space: normal; }
 .sub { margin: 0; font: 700 var(--t-small)/1.3 var(--mono); font-stretch: 87.5%; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
 
 /* Buttons here are a size down from the guide's; mini ones (header, footer, row ends) a size down again. */
@@ -300,6 +303,44 @@ html, body { height: 100%; background: transparent; }
 /* A longer hint (a setting's small line, or a whole sentence under a choice) wraps instead of cutting off. */
 .why.wrap, .setting > span small.wrap { white-space: normal; }
 .setting small.bad { color: var(--danger); white-space: normal; }
+
+/* ---------- effort: how hard a model thinks, a slider under its model choice ---------- */
+/* A slot's block: its model row, then its Effort slider. The slider's track and ticks share one inset (--t: the thumb's
+   width), so each tick sits under its stop. */
+.slot { display: grid; gap: 6px; min-width: 0; }
+.effort { --t: 12px; display: grid; gap: 4px; min-width: 0; padding: 0 10px; overflow: hidden; container-type: inline-size; }
+.effort-lbl { font-size: var(--t-small); line-height: 1.3; color: var(--ink-2); }
+.effort-none { margin: 0; padding: 0 10px; font-size: var(--t-small); line-height: 1.4; color: var(--ink-3); }
+/* The slider: a slim track in the accent, filled up to the stop (--p, 0 to 1); the thumb is a small square. */
+.effort-range { appearance: none; -webkit-appearance: none; display: block; width: 100%; height: 16px; margin: 0; padding: 0; background: transparent; cursor: pointer; }
+.effort-range:focus { outline: none; }
+.effort-range::-webkit-slider-runnable-track {
+  height: 4px; margin-top: 6px;
+  background: linear-gradient(to right, var(--accent) calc(var(--t) / 2 + (100% - var(--t)) * var(--p, 0)), var(--line) 0);
+}
+.effort-range::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 12px; height: 12px; margin-top: 2px; border: 0; border-radius: 0;
+  background: var(--accent); box-shadow: 0 0 8px rgba(120, 255, 226, 0.6); cursor: pointer;
+}
+.effort-range::-moz-range-track { height: 4px; background: var(--line); }
+.effort-range::-moz-range-progress { height: 4px; background: var(--accent); }
+.effort-range::-moz-range-thumb { width: 12px; height: 12px; border: 0; border-radius: 0; background: var(--accent); box-shadow: 0 0 8px rgba(120, 255, 226, 0.6); cursor: pointer; }
+.effort-range:focus-visible::-webkit-slider-thumb { background: var(--ink); box-shadow: 0 0 0 2px var(--bg); }
+.effort-range:focus-visible::-moz-range-thumb { background: var(--ink); box-shadow: 0 0 0 2px var(--bg); }
+/* The stops' names: one column per stop, the spacing of the thumb's positions (the grid is wider than the track by
+   one stop's share, and its overflow is clipped by .effort). The current stop is lit. */
+.effort-ticks {
+  display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr));
+  width: calc((100% - var(--t)) * var(--n) / (var(--n) - 1));
+  margin-inline-start: calc(var(--t) / 2 - (100% - var(--t)) / (2 * (var(--n) - 1)));
+}
+.effort-ticks span { min-width: 0; text-align: center; font: 500 var(--t-small)/1.2 var(--mono); color: var(--ink-3); white-space: nowrap; }
+.effort-ticks span.on { color: var(--accent); font-weight: 700; }
+/* Narrow: the names of the middle stops step aside (they keep their place), so the ends and the lit stop never collide. */
+@container (max-width: 240px) {
+  .effort-ticks span:not(:first-child):not(:last-child):not(.on) { visibility: hidden; }
+}
+.effort-hint { margin: 0; padding: 0 10px; }
 
 /* Tooltip: a small LED-framed card against its control, dissolving in like the rows. */
 .tip {
