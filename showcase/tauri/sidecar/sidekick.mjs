@@ -108,6 +108,7 @@ const DEFAULTS = {
   notch: 'off', // where I appear on a Mac with a notch: 'off' (beside the cursor, default), 'drop' (the capsule) or 'spread' (see notchMode)
   onboarded: false, onboardStep: 0, filesAsked: false, keys: DEFAULT_KEYS, muteWhileTalking: true, autoListen: false, listenEvery: false, listenSecs: 8, lite: false, wakeWord: false, setupVersion: 0, size: 'default', look: 'classic', introDone: false,
   replies: 'text', // 'voice': spoken (with Fish Audio or Gemini) as well as shown
+  speechLang: 'auto', // the language talking is recognised in (macOS): 'auto' follows the Mac's language list, or a locale like 'ar-SA'
   tts: 'fish', // which one speaks: 'fish' (Fish Audio), 'gemini' or 'voicestudio' (the VoiceStudio app on this computer)
   studioVoices: {}, // look → its VoiceStudio voice (a saved profile id; none: the selected engine's default voice)
   fishModel: FISH_CHOICES[0].id, // Drama 3 (most expressive) or S2.1 Pro (natural pace, cheaper)
@@ -1915,7 +1916,7 @@ function panelState() {
     geminiModel: config.geminiModel, geminiModels: GEMINI_CHOICES,
     studio: tts().local ? studioState() : null,
     voice: VOICE_OK ? {
-      on: !!config.voice, keys: HOTKEYS_OK ? talkSymbols() : null, ready: voiceReady(), mac: MAC, mute: config.muteWhileTalking !== false, autoListen: !!config.autoListen, listenEvery: !!config.listenEvery, listenSecs: listenSecs(), listenChoices: LISTEN_SECS, snoozeListen: !!config.snoozeListen, wakeWord: !!config.wakeWord, wakeName: wakeName(config),
+      on: !!config.voice, lang: speechLangId(), langOnline: langInfo && langInfo.id === speechLangId() ? langInfo.online : null, keys: HOTKEYS_OK ? talkSymbols() : null, ready: voiceReady(), mac: MAC, mute: config.muteWhileTalking !== false, autoListen: !!config.autoListen, listenEvery: !!config.listenEvery, listenSecs: listenSecs(), listenChoices: LISTEN_SECS, snoozeListen: !!config.snoozeListen, wakeWord: !!config.wakeWord, wakeName: wakeName(config),
       // The mic picker: what the voice helper lists, the pick ('' is automatic) and the mic automatic uses now.
       mics: mics.list, mic: config.mic ?? '', micAuto: mics.list.find((x) => x.id === mics.auto)?.name ?? '',
       download: NEEDS_MODEL && config.voice && !voiceReady() ? { status: voiceModel.status, pct: voiceModel.total ? Math.floor((voiceModel.done / voiceModel.total) * 100) : 0, size: sizeLabel() } : null,
@@ -1930,8 +1931,12 @@ function panelState() {
 }
 
 
+// The languages talking can be recognised in (macOS). 'auto' follows the Mac's own language list.
+const SPEECH_LANGS = ['auto', 'en-US', 'ar-SA', 'he-IL', 'es-ES', 'fr-FR', 'de-DE', 'it-IT', 'pt-BR', 'ja-JP', 'ko-KR', 'zh-CN', 'hi-IN'];
+const speechLangId = () => (SPEECH_LANGS.includes(config.speechLang) ? config.speechLang : 'auto');
+let langInfo = null; // what the voice helper settled on for it: { id, engine, online }
 const voiceConfig = () => {
-  send({ type: 'voice_config', enabled: VOICE_OK && config.voice && voiceReady(), mute: config.muteWhileTalking !== false, sound: !!config.sound, wake: MAC && !!config.wakeWord, wakeName: config.wakeName || '', ...(NEEDS_MODEL ? { model: MODEL_DIR } : {}) });
+  send({ type: 'voice_config', enabled: VOICE_OK && config.voice && voiceReady(), mute: config.muteWhileTalking !== false, sound: !!config.sound, wake: MAC && !!config.wakeWord, wakeName: config.wakeName || '', lang: MAC ? speechLangId() : 'auto', ...(NEEDS_MODEL ? { model: MODEL_DIR } : {}) });
   // The native listening pill beside the cursor stays hidden while the notch capsule is where I appear.
   send({ type: 'pill', on: notchMode() === 'off' });
 };
@@ -1987,6 +1992,7 @@ function onVoice(m) {
   else if (m.type === 'voice_state' && m.state === 'idle' && snap?.waitingVoice) snap.waitingVoice = false;
   else if (m.type === 'voice_ready') micPick();
   else if (m.type === 'voice_mics') { mics = cleanMics(m); panel(); }
+  else if (m.type === 'voice_lang') { langInfo = { id: String(m.id ?? ''), engine: String(m.engine ?? ''), online: !!m.online }; logLine('speech_lang', langInfo); panel(); }
   else if (m.type === 'voice_error') {
     if (m.code === 'nothing_heard' && snap) { snap.waitingVoice = false; return; }
     if (m.code === 'model_missing') startVoiceDownload();
@@ -2083,6 +2089,12 @@ async function onMenu(id, via) {
       if (c && done) ui({ kind: 'agent', e: { type: 'emote', action: 'hype' } }), say(c.advanced ? `Done: ${c.text}. See you again ${shortWhen(c.due)}!` : `Done: ${c.text}. That's what I'm talking about!`, 'happy');
       scheduleReminders();
     });
+  }
+  // The language talking is recognised in (macOS): the helper switches engine when Apple's newer one lacks the language.
+  else if (id.startsWith('speechlang:') && MAC) {
+    const lang = id.slice(11);
+    if (!SPEECH_LANGS.includes(lang)) return;
+    config.speechLang = lang; langInfo = null; saveConfig(); voiceConfig(); menu();
   }
   else if (id.startsWith('model:')) {
     const [, p, ...rest] = id.split(':');

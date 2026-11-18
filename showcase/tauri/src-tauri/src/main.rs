@@ -1790,6 +1790,9 @@ fn handle_sidecar(app: &AppHandle, msg: Value) {
                 to_voice(app, &json!({ "cmd": "wake", "on": wake }));
                 let name = msg.get("wakeName").and_then(Value::as_str).unwrap_or("");
                 to_voice(app, &json!({ "cmd": "wake_name", "word": name }));
+                // The language takes are recognised in ("auto": the Mac's own language list). macOS helper only.
+                let lang = msg.get("lang").and_then(Value::as_str).unwrap_or("auto");
+                to_voice(app, &json!({ "cmd": "lang", "id": lang }));
             } else {
                 stop_voice(app);
             }
