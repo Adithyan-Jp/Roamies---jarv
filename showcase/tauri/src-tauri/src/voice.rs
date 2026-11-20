@@ -275,9 +275,14 @@ fn handle_voice(app: &AppHandle, msg: Value) {
         }
         Some("partial") | Some("level") => to_overlays(app, &ui),
         Some("final") => {
-            to_overlays(app, &ui);
+            // audio: a take the helper only recorded (Malayalam, which its speech model has none of): a WAV file the
+            // sidecar reads. There are no words for the overlays yet; the sidecar sends them once it has read the clip.
+            let clip = msg.get("audio").filter(|a| !a.is_null());
+            if clip.is_none() {
+                to_overlays(app, &ui);
+            }
             // area: the part of the screen marked with the pen while talking (a PNG, its rect and the strokes).
-            to_sidecar(app, &json!({ "type": "voice", "text": msg.get("text"), "area": msg.get("area"), "ms": msg.get("ms"), "via": msg.get("via") }));
+            to_sidecar(app, &json!({ "type": "voice", "text": msg.get("text"), "area": msg.get("area"), "ms": msg.get("ms"), "via": msg.get("via"), "audio": clip }));
         }
         Some("error") => {
             let mut m = msg.clone();

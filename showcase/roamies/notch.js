@@ -41,7 +41,7 @@
   /* Centred by its left edge (the host sets it from var(--w)), never a percentage translate: WebKit freezes those at
      the size an animation started at, so it came out off-centre. Squash and hover scale are set by the frame loop for
      the same reason (no animation handed to the GPU). */ background: #000; color: var(--ink); border-radius: 0 0 var(--r) var(--r);
-  font: 400 12.5px/20px "Martian Mono", "Roamies Arabic", ui-monospace, Menlo, monospace;
+  font: 400 12.5px/20px "Martian Mono", "Roamies Arabic", "Roamies Malayalam", ui-monospace, Menlo, monospace;
   pointer-events: none; visibility: hidden; contain: layout style;
   transition: --w .46s cubic-bezier(.22, 1, .36, 1), --h .4s cubic-bezier(.22, 1, .36, 1), --r .4s cubic-bezier(.22, 1, .36, 1),
     top .6s cubic-bezier(.3, 1.35, .5, 1), box-shadow .35s ease, --glow-a .6s ease, --glow-b .6s ease; }
@@ -126,7 +126,7 @@
 .nc[data-mode="error"] { --glow-a: #ffcf86; --glow-b: #ff6a2f; }
 @property --glow-a { syntax: '<color>'; inherits: true; initial-value: #6fd6ff; }
 @property --glow-b { syntax: '<color>'; inherits: true; initial-value: #2a6bff; }
-.nc-mark { flex: none; color: #fff; font: 800 15px/1 "Doto", "Martian Mono", "Roamies Arabic", ui-monospace, monospace;
+.nc-mark { flex: none; color: #fff; font: 800 15px/1 "Doto", "Martian Mono", "Roamies Arabic", "Roamies Malayalam", ui-monospace, monospace;
   letter-spacing: .02em; text-shadow: 0 0 10px rgba(0, 30, 90, .55); white-space: nowrap; }
 .nc:not(.drop) .nc-globe { order: -1; }
 .nc:not(.drop) .nc-status { margin-left: auto; }
@@ -175,7 +175,7 @@
 .nc-text.short { -webkit-mask-image: none; }
 .nc-heard { color: var(--ink-3); }
 /* Each line is its own paragraph with its own direction (Arabic and Hebrew run right to left, in the Arabic font). */
-.nc-line:dir(rtl) { font-family: "Roamies Arabic RTL", "Martian Mono", "Roamies Arabic", ui-monospace, Menlo, monospace; }
+.nc-line:dir(rtl) { font-family: "Roamies Arabic RTL", "Martian Mono", "Roamies Arabic", "Roamies Malayalam", ui-monospace, Menlo, monospace; }
 .nc-choices { display: flex; gap: 8px; margin-top: 12px; }
 .nc-choices button { font: inherit; letter-spacing: inherit; border-radius: 999px; padding: 4px 14px; cursor: pointer;
   border: 1px solid rgba(120,255,226,.45); background: transparent; color: var(--ink); }

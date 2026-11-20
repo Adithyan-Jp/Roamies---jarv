@@ -93,6 +93,38 @@ fn transcribe(asr: &mut ParakeetTDT, audio: Vec<f32>) -> String {
     }
 }
 
+/// A take as a 16-bit mono WAV in the temp folder, for the sidecar to read and delete (Malayalam: Parakeet has no
+/// Malayalam, so the sidecar reads the take with its own engine). → its path, or None when it can't be written.
+fn write_clip(take: u64, audio: &[f32]) -> Option<PathBuf> {
+    let mut pcm: Vec<u8> = Vec::with_capacity(audio.len() * 2);
+    for s in audio {
+        pcm.extend_from_slice(&((s.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes());
+    }
+    let mut wav: Vec<u8> = Vec::with_capacity(44 + pcm.len());
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36 + pcm.len() as u32).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes()); // fmt chunk size
+    wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    wav.extend_from_slice(&1u16.to_le_bytes()); // mono
+    wav.extend_from_slice(&RATE.to_le_bytes());
+    wav.extend_from_slice(&(RATE * 2).to_le_bytes()); // bytes per second
+    wav.extend_from_slice(&2u16.to_le_bytes()); // bytes per frame
+    wav.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&(pcm.len() as u32).to_le_bytes());
+    wav.extend_from_slice(&pcm);
+    // The name is the one the sidecar looks for (malayalam.mjs: roamies-ml-<pid>-<take>.wav).
+    let path = std::env::temp_dir().join(format!("roamies-ml-{}-{}.wav", std::process::id(), take));
+    match std::fs::write(&path, &wav) {
+        Ok(()) => Some(path),
+        Err(e) => {
+            log(&format!("clip: {e}"));
+            None
+        }
+    }
+}
+
 fn spawn_engine(dir: PathBuf, tx: Sender<Ev>) -> (Sender<Job>, thread::JoinHandle<()>) {
     let (jtx, jrx) = mpsc::channel::<Job>();
     let handle = thread::spawn(move || {
@@ -207,6 +239,9 @@ struct Voice {
     source: Option<Source>,
     engine: Option<Sender<Job>>,
     engine_error: Option<String>,
+    /// Malayalam ({"cmd":"lang","id":"ml-IN"}): takes are only recorded; the app reads them (see write_clip).
+    external: bool,
+    clip: Option<PathBuf>,
     reading: bool,
     read_at: f64,
     read_len: usize,
@@ -243,6 +278,8 @@ impl Voice {
             source: None,
             engine,
             engine_error: None,
+            external: false,
+            clip: None,
             reading: false,
             read_at: 0.0,
             read_len: 0,
@@ -347,13 +384,15 @@ impl Voice {
                 }
                 let quiet = now - self.heard_at.max(self.voice_at);
                 let stale = self.read_len.saturating_sub(self.heard_len) as f64 / RATE as f64;
-                if !self.best.is_empty() && quiet > PAUSE_ENDS {
+                // When the app reads the take there are no live words: having heard speech is what counts.
+                let have_words = !self.best.is_empty() || (self.external && self.spoke);
+                if have_words && quiet > PAUSE_ENDS {
                     self.end("pause", now);
                     self.finish();
-                } else if !self.best.is_empty() && stale > STALE_ENDS {
+                } else if have_words && stale > STALE_ENDS {
                     self.end("no new words", now);
                     self.finish();
-                } else if self.best.is_empty() && !self.reading && now - self.listen_at > self.nothing_wait && now - self.voice_at > PAUSE_ENDS {
+                } else if !have_words && !self.reading && now - self.listen_at > self.nothing_wait && now - self.voice_at > PAUSE_ENDS {
                     self.end("nothing heard", now);
                     self.cancel();
                 } else if now - self.listen_at > MAX_SESSION {
@@ -380,7 +419,7 @@ impl Voice {
         self.read_len = 0;
         self.heard_len = 0;
         // Start the mic now so the first word isn't lost (a shortcut cancels it a moment later).
-        if self.engine.is_some() && keys::mic_allowed() {
+        if (self.engine.is_some() || self.external) && keys::mic_allowed() {
             self.start_audio();
         }
     }
@@ -390,7 +429,7 @@ impl Voice {
         self.heard_at = now;
         self.voice_at = now;
         self.read_at = now;
-        if self.engine.is_none() {
+        if self.engine.is_none() && !self.external {
             let code = if self.engine_error.is_some() { "recognition" } else { "model_missing" };
             emit(json!({ "type": "error", "code": code, "message": self.engine_error.clone().unwrap_or_default() }));
             return self.cancel();
@@ -435,6 +474,9 @@ impl Voice {
 
     // While listening: re-read the whole take now and then, for live text and pause detection.
     fn maybe_read(&mut self, now: f64) {
+        if self.external {
+            return;
+        }
         let Some(engine) = &self.engine else { return };
         if !self.spoke || self.reading || now - self.read_at < READ_EVERY {
             return;
@@ -469,6 +511,12 @@ impl Voice {
     fn close_take(&mut self, now: f64) {
         self.stop_audio();
         let audio = std::mem::take(&mut *self.buf.lock().unwrap());
+        if self.external {
+            if self.spoke && audio.len() >= RATE as usize / 4 {
+                self.clip = write_clip(self.take, &audio);
+            }
+            return self.finalize();
+        }
         match &self.engine {
             Some(engine) if self.spoke && engine.send(Job { take: self.take, audio, last: true }).is_ok() => self.final_until = Some(now + FINAL_TIMEOUT),
             _ => self.finalize(),
@@ -526,6 +574,17 @@ impl Voice {
         self.phase = Phase::Idle;
         let text = self.best.trim().to_string();
         let area = self.ink.take();
+        // A take for the app to read: it follows with the words and the end of the talk, so no "idle" goes out here
+        // (the overlay keeps showing that it is working on it).
+        if let Some(clip) = self.clip.take() {
+            let mut msg = json!({ "type": "final", "text": "", "audio": { "file": clip.to_string_lossy(), "rate": RATE } });
+            if let Some(a) = area {
+                msg["area"] = a;
+            }
+            emit(msg);
+            self.report_empty = false;
+            return;
+        }
         if !text.is_empty() {
             // What was circled on screen while talking rides along with the words.
             let mut msg = json!({ "type": "final", "text": text });
@@ -611,6 +670,12 @@ impl Voice {
                     let id = msg.get("id").and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_owned);
                     log(&format!("mic: {}", id.as_deref().unwrap_or("default")));
                     *audio::CHOSEN.lock().unwrap() = id;
+                }
+                // The language takes are read in: Malayalam is recorded for the app to read, any other goes to Parakeet.
+                Some("lang") => {
+                    let id = msg.get("id").and_then(Value::as_str).unwrap_or("auto");
+                    self.external = id == "ml-IN";
+                    log(&format!("language: {id}{}", if self.external { " (read by the app)" } else { "" }));
                 }
                 Some("chord") => {
                     let mods: Vec<String> = msg.get("mods").and_then(Value::as_array).map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect()).unwrap_or_default();

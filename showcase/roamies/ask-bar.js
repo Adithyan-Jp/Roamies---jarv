@@ -39,13 +39,13 @@
   resize: none; overflow-x: hidden; overflow-y: hidden; overflow-wrap: anywhere; overscroll-behavior: contain;
   scrollbar-width: thin; scrollbar-color: var(--line-hi) transparent; appearance: none; -webkit-appearance: none;
   background-color: transparent; color: var(--ink); caret-color: var(--accent);
-  font: 500 13.5px/18px "Martian Mono", "Roamies Arabic", ui-monospace, Menlo, monospace; cursor: text; }
+  font: 500 13.5px/18px "Martian Mono", "Roamies Arabic", "Roamies Malayalam", ui-monospace, Menlo, monospace; cursor: text; }
 /* Focus shows on the frame (lit while it has the keys, dull while it waits) and as the caret. The see-through
    outline is the ring forced-colours modes draw instead. */
 .ab-in .ab-text:focus-visible { outline: 2px solid transparent; outline-offset: 0; }
 .ab-in .ab-text::placeholder { color: var(--ink-3); opacity: 1; }
 /* 12.5px, as in the capsule: at 13.5px the dots under a final ي fall outside the 18px line and are cut off. */
-.ab-in .ab-text:dir(rtl) { font-size: 12.5px; font-family: "Roamies Arabic RTL", "Martian Mono", "Roamies Arabic", ui-monospace, Menlo, monospace; }
+.ab-in .ab-text:dir(rtl) { font-size: 12.5px; font-family: "Roamies Arabic RTL", "Martian Mono", "Roamies Arabic", "Roamies Malayalam", ui-monospace, Menlo, monospace; }
 .ab-in .ab-text::selection { background: #1f5f58; color: #e8fffa; }
 /* Waiting with something typed while you're in another app. */
 .ab.away { background: var(--line-hi); color: #e8fffa; }

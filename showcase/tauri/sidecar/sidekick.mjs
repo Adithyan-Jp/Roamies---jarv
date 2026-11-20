@@ -50,6 +50,7 @@ import { SLOTS, isSetting, resolveEffort } from './effort.mjs';
 import { pickNotch } from './notch.mjs';
 import { DEFAULT_VOICE, FISH_CHOICES } from './fish.mjs';
 import { GEMINI_CHOICES, GEMINI_DEFAULT_VOICE, GEMINI_LOOK_VOICES, GEMINI_MODEL, GEMINI_VOICES } from './gemini.mjs';
+import { ML, ML_ENGINES, createEars, readClip } from './malayalam.mjs';
 import { createSecrets, retryLoad, runInput } from './secrets.mjs';
 import { showTrayIcon } from './wintray.mjs';
 import { createActivity } from './activity.mjs';
@@ -121,7 +122,9 @@ const DEFAULTS = {
   notch: 'off', // where I appear on a Mac with a notch: 'off' (beside the cursor, default), 'drop' (the capsule) or 'spread' (see notchMode)
   onboarded: false, onboardStep: 0, filesAsked: false, keys: DEFAULT_KEYS, muteWhileTalking: true, autoListen: false, listenEvery: false, listenSecs: 8, lite: false, wakeWord: false, setupVersion: 0, size: 'default', look: 'classic', introDone: false,
   replies: 'text', // 'voice': spoken (with Fish Audio or Gemini) as well as shown
-  speechLang: 'auto', // the language talking is recognised in (macOS): 'auto' follows the Mac's language list, or a locale like 'ar-SA'
+  speechLang: 'auto', // the language talking is recognised in: 'auto' follows the Mac's language list (Windows and Linux: Parakeet's own languages), or a locale like 'ar-SA' ('ml-IN': Malayalam, read by mlEngine)
+  mlEngine: 'local', // what reads Malayalam (Windows and Linux): 'local' (a whisper.cpp server on this computer) or 'gemini' (the cloud)
+  mlServer: '', mlModel: '', mlUrl: '', // local: the whisper-server program and the ggml Malayalam model Roamies starts it with; or the address of one they run themselves
   tts: 'fish', // which one speaks: 'fish' (Fish Audio), 'gemini' or 'voicestudio' (the VoiceStudio app on this computer)
   studioSpeak: 'short', // how much VoiceStudio says out loud: 'short', 'medium' or 'full' (it renders slower than real time)
   studioVoices: {}, // look → its VoiceStudio voice (a saved profile id; none: the selected engine's default voice)
@@ -789,7 +792,7 @@ const livePrompt = (context = '') => {
   lastFactIds = facts.map((f) => f.id);
   const open = commitmentsText(), done = doneTodayText(), working = agents.liveText();
   const turn = `Live state (current as of this moment):
-${frontNow ? `${frontNow}\n` : ''}${focusLine()}${crewLine()}- Editing files, running commands and controlling other apps: ${config.allowActions ? 'ALLOWED' : `switched OFF (tell the user to turn on "Allow File Edits & Commands" on the General page in ${PANEL} if they want it)`}.${config.allowActions && config.skipAllow ? ' Allow prompts are skipped: confirmations go ahead automatically, so be extra careful.' : ''}
+${frontNow ? `${frontNow}\n` : ''}${focusLine()}${crewLine()}${malayalamOn() ? `- Language: ${userName} talks to you in Malayalam. Their messages may be Malayalam in Malayalam script (a speech transcript, so words can be misheard or have English mixed in). Reply in Malayalam, in Malayalam script, in short natural spoken sentences, unless they write or ask in English, in which case answer in English. Keep names, app names, commands, file names and numbers as they are. Voice cues in square brackets stay in English.\n` : ''}- Editing files, running commands and controlling other apps: ${config.allowActions ? 'ALLOWED' : `switched OFF (tell the user to turn on "Allow File Edits & Commands" on the General page in ${PANEL} if they want it)`}.${config.allowActions && config.skipAllow ? ' Allow prompts are skipped: confirmations go ahead automatically, so be extra careful.' : ''}
 ${VOICE_OK ? `- Voice: ${!config.voice ? 'off' : voiceReady() ? `on; ${HOTKEYS_OK ? `${userName} holds ${talkWords()} to talk` : `${userName} presses the key they bound to ${BIND.talk} to start talking and again to send (a pause sends too)`}${config.autoListen ? (config.listenEvery ? `. Auto-listen is on for every reply: after each spoken reply the mic opens by itself for ${listenSecs()} seconds, so they can just keep talking` : '. Auto-listen is on: when your reply to a spoken question ends with a question, the mic opens by itself for their answer') : ''}${!MAC ? '. There is no wake word on this computer (it is Mac-only so far): to talk they use the talk keys' : ''}${MAC && config.wakeWord ? `. Wake word is on: ${userName} can also say "Hey ${wakeName(config)}" to start talking hands-free, and what they say right after it is the request (a request that still starts with "Hey ${wakeName(config)}" is them waking you, not calling you by another name: never correct it)${config.wakeName ? ` (they chose "${config.wakeName}" as the wake word; your own name is unchanged)` : ''}` : ''}` : `on, but the speech model isn't downloaded yet (${voiceModel.status === 'downloading' ? 'downloading now' : `the Listening page in ${PANEL}`})`}.` : ''}
 - Shortcuts: ${HOTKEYS_OK ? `${keys().write ? `type a question to you: a quick tap of ${writeWords()} (press both and let go), which opens a text field beside the cursor (Enter sends, Shift+Enter adds a line, Esc or another tap closes it)` : `the tap that opens a text field to type a question is turned off (the Ask button in ${PANEL} still opens it; the Shortcuts page there turns the tap back on)`}; show or hide you ${keyWords(keys().summon)}` : `on this Wayland desktop no app can have global shortcuts, so ${userName} binds keys to these commands in their desktop's keyboard settings: ${BIND.summon} (show or hide you), ${BIND.ask} (ask you), ${BIND.list} (the list), ${BIND.talk} (talk) and ${BIND.panel} (the panel)`}${SNAP_OK ? `; ask about an area ${keyWords(keys().snap)}` : ''}${CIRCLE_OK ? "; while holding the talk keys, moving the cursor round something circles it (no clicking; it snaps shut with a click when the circle closes, and loose lines don't count) and you'll see what they circled" : ''}${HOTKEYS_OK ? `; show the list ${keyWords(keys().list)}` : ''}.${HANDS_OK ? '' : ' Asking about an area, reading app windows, finding things on screen by their words and working other apps need the Roamies app, which isn\'t running here; draw there with x, y from a screenshot.'}`;
   const memory = `${open ? `Open commitments:\n${open}` : 'No open commitments.'}${done ? `\nDone today (ticked off on the list or by you; still shown struck through until midnight):\n${done}` : ''}
@@ -2116,7 +2119,7 @@ function panelState() {
     geminiModel: config.geminiModel, geminiModels: GEMINI_CHOICES,
     studio: tts().local ? studioState() : null,
     voice: VOICE_OK ? {
-      on: !!config.voice, lang: speechLangId(), langOnline: langInfo && langInfo.id === speechLangId() ? langInfo.online : null, studioSpeak: config.studioSpeak === 'full' || config.studioSpeak === 'medium' ? config.studioSpeak : 'short', keys: HOTKEYS_OK ? talkSymbols() : null, ready: voiceReady(), mac: MAC, mute: config.muteWhileTalking !== false, autoListen: !!config.autoListen, listenEvery: !!config.listenEvery, listenSecs: listenSecs(), listenChoices: LISTEN_SECS, snoozeListen: !!config.snoozeListen, wakeWord: !!config.wakeWord, wakeName: wakeName(config),
+      on: !!config.voice, lang: speechLangId(), langOnline: langInfo && langInfo.id === speechLangId() ? langInfo.online : null, studioSpeak: config.studioSpeak === 'full' || config.studioSpeak === 'medium' ? config.studioSpeak : 'short', keys: HOTKEYS_OK ? talkSymbols() : null, ready: voiceReady(), mac: MAC, ml: MAC ? null : { engine: ears.engine(), ready: mlStatus.ready, note: mlStatus.note, server: config.mlServer || '', model: config.mlModel || '' }, mute: config.muteWhileTalking !== false, autoListen: !!config.autoListen, listenEvery: !!config.listenEvery, listenSecs: listenSecs(), listenChoices: LISTEN_SECS, snoozeListen: !!config.snoozeListen, wakeWord: !!config.wakeWord, wakeName: wakeName(config),
       // The mic picker: what the voice helper lists, the pick ('' is automatic) and the mic automatic uses now.
       mics: mics.list, mic: config.mic ?? '', micAuto: mics.list.find((x) => x.id === mics.auto)?.name ?? '',
       download: NEEDS_MODEL && config.voice && !voiceReady() ? { status: voiceModel.status, pct: voiceModel.total ? Math.floor((voiceModel.done / voiceModel.total) * 100) : 0, size: sizeLabel() } : null,
@@ -2132,11 +2135,13 @@ function panelState() {
 
 
 // The languages talking can be recognised in (macOS). 'auto' follows the Mac's own language list.
-const SPEECH_LANGS = ['auto', 'en-US', 'ar-SA', 'he-IL', 'es-ES', 'fr-FR', 'de-DE', 'it-IT', 'pt-BR', 'ja-JP', 'ko-KR', 'zh-CN', 'hi-IN'];
+// Windows and Linux: Parakeet picks among its own languages ('auto'), or Malayalam, which it has none of, is read by the Malayalam engine.
+const SPEECH_LANGS = MAC ? ['auto', 'en-US', 'ar-SA', 'he-IL', 'es-ES', 'fr-FR', 'de-DE', 'it-IT', 'pt-BR', 'ja-JP', 'ko-KR', 'zh-CN', 'hi-IN'] : ['auto', ML];
+const malayalamOn = () => !MAC && VOICE_OK && config.speechLang === ML;
 const speechLangId = () => (SPEECH_LANGS.includes(config.speechLang) ? config.speechLang : 'auto');
 let langInfo = null; // what the voice helper settled on for it: { id, engine, online }
 const voiceConfig = () => {
-  send({ type: 'voice_config', enabled: VOICE_OK && config.voice && voiceReady(), mute: config.muteWhileTalking !== false, sound: !!config.sound, wake: MAC && !!config.wakeWord, wakeName: config.wakeName || '', lang: MAC ? speechLangId() : 'auto', ...(NEEDS_MODEL ? { model: MODEL_DIR } : {}) });
+  send({ type: 'voice_config', enabled: VOICE_OK && config.voice && voiceReady(), mute: config.muteWhileTalking !== false, sound: !!config.sound, wake: MAC && !!config.wakeWord, wakeName: config.wakeName || '', lang: speechLangId(), ...(NEEDS_MODEL ? { model: MODEL_DIR } : {}) });
   // The native listening pill beside the cursor stays hidden while the notch capsule is where I appear.
   send({ type: 'pill', on: notchMode() === 'off' });
 };
@@ -2180,10 +2185,60 @@ const PRIVACY = { microphone: 'Privacy_Microphone', speech: 'Privacy_SpeechRecog
 // The mics the voice helper last listed (asked whenever the panel opens), and the pick sent to it ('' is automatic).
 let mics = { list: [], auto: '' };
 const micPick = () => send({ type: 'voice_mic', id: config.mic ?? '' });
+
+// ---------- Malayalam: an optional language to talk in (Windows and Linux; malayalam.mjs) ----------
+// With the language set to Malayalam the voice helper only records each take (a WAV in the temp folder) and says so
+// in its "final" (audio.file); the engine the user picked reads it. While that runs the overlay keeps its
+// "processing" pill: the words and the end of the talk are sent to it from here, in the order the helper's would be.
+const ears = createEars({
+  config: () => config,
+  geminiKey: async () => (await voiceKey('gemini').catch(() => [null]))[0] ?? null,
+  log: (s) => logLine('malayalam', s),
+});
+process.on('exit', () => ears.stop());
+let mlStatus = { engine: 'local', ready: false, note: '' };
+const refreshMl = async () => { try { mlStatus = await ears.status(); } catch { /* the panel shows the last one */ } };
+const mlSetupHelp = () => (config.mlEngine === 'gemini'
+  ? `For Malayalam with Gemini I need a Gemini key: add one on the Model page in ${PANEL}, or switch to the engine on this computer on the Listening page.`
+  : `To understand Malayalam on this computer I need whisper-server and a Malayalam model: tell me where they are on the Listening page in ${PANEL}, or switch it to Gemini there.`);
+// What to tell them when a take couldn't be read, by the error's code (malayalam.mjs).
+const mlTrouble = (e) => {
+  switch (e?.code) {
+    case 'setup': return `${e.message} ${mlSetupHelp()}`;
+    case 'key': return config.mlEngine === 'gemini' && /not accept/.test(e.message) ? `Gemini didn't accept the key, so I can't read Malayalam. Check it on the Model page in ${PANEL}.` : mlSetupHelp();
+    case 'rate': return `${e.message} Try again in a bit, or switch to the engine on this computer on the Listening page.`;
+    case 'network': return `${e.message} Replies still work; try talking again in a moment.`;
+    case 'local_down': return `${e.message} I haven't sent it anywhere else: you can switch to Gemini on the Listening page if you'd rather.`;
+    default: return "I couldn't read that Malayalam. Try again?";
+  }
+};
+async function onClip(m) {
+  const area = m.area;
+  const overlay = (e) => ui({ kind: 'voice', ...e });
+  try {
+    const wav = await readClip(m.audio?.file);
+    const t0 = Date.now();
+    const text = await ears.hear(wav);
+    logLine('voice_final', { ms: Date.now() - t0, via: `ml-${ears.engine()}`, chars: text.length });
+    if (!text) throw Object.assign(new Error('nothing heard'), { code: 'empty' });
+    overlay({ type: 'final', text });
+    overlay({ type: 'state', state: 'idle' });
+    onSpoken(text, area);
+  } catch (e) {
+    overlay({ type: 'state', state: 'idle' });
+    if (area?.file) fs.unlink(area.file).catch(() => {});
+    if (e?.code === 'empty') return say("I heard you but couldn't make out the words. Try again a little closer to the mic?", 'concerned');
+    logLine('malayalam_error', { code: e?.code ?? 'unknown', message: String(e?.message ?? e).slice(0, 200) });
+    refreshMl().then(() => panelOpen && panel());
+    say(mlTrouble(e), 'concerned');
+  }
+}
+
 function onVoice(m) {
   if (m.type === 'voice_state') { voiceBusy = m.state === 'listening' || m.state === 'processing'; stir(); }
   if (m.type === 'voice_state' && m.state === 'listening') { interruptQuietly('listening'); speech.stop(); warmUp(); if (VOICE_ON()) speech.prewarm(); } // talking over it stops it
   else if (m.type === 'voice_state' && m.state === 'processing') frontSoon = { at: Date.now(), p: whereNow() };
+  else if (m.type === 'voice' && m.audio?.file) onClip(m).catch((e) => console.error('malayalam clip', e));
   else if (m.type === 'voice' && m.text?.trim()) {
     // Key release to the words arriving (mic tail and the recogniser finishing), to see what that step costs.
     if (typeof m.ms === 'number') logLine('voice_final', { ms: m.ms, via: String(m.via ?? ''), chars: m.text.trim().length });
@@ -2290,11 +2345,20 @@ async function onMenu(id, via) {
       scheduleReminders();
     });
   }
-  // The language talking is recognised in (macOS): the helper switches engine when Apple's newer one lacks the language.
-  else if (id.startsWith('speechlang:') && MAC) {
+  // The language talking is recognised in (macOS: the helper switches engine when Apple's newer one lacks the language;
+  // Windows and Linux: Malayalam is read by the Malayalam engine, everything else by Parakeet).
+  else if (id.startsWith('speechlang:')) {
     const lang = id.slice(11);
     if (!SPEECH_LANGS.includes(lang)) return;
     config.speechLang = lang; langInfo = null; saveConfig(); voiceConfig(); menu();
+    if (lang === ML) refreshMl().then(() => { panel(); if (!mlStatus.ready) say(mlSetupHelp()); });
+  }
+  // Which engine reads Malayalam.
+  else if (id.startsWith('mlengine:')) {
+    const e = id.slice(9);
+    if (!ML_ENGINES.includes(e)) return;
+    config.mlEngine = e; saveConfig();
+    refreshMl().then(() => panel());
   }
   else if (/^studiospeak_(short|medium|full)$/.test(id)) { config.studioSpeak = id.slice(12); speech.setStudioSpeak?.(config.studioSpeak); saveConfig(); menu(); }
   // The two master switches.
@@ -2659,7 +2723,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   let m;
   try { m = JSON.parse(line); } catch { return; }
   if (m.type === 'menu') onMenu(m.id, m.via).catch((e) => console.error('menu', e));
-  else if (m.type === 'panel_open') { panelOpen = true; panelAt = Date.now(); logLine('panel_open', {}); if (VOICE_OK) send({ type: 'voice_mics' }); Promise.all([refreshAuth(), signedIn.get('local') && syncLocal(), tts().local && speech.checkLocal()]).catch(() => {}).finally(() => { panel(); refreshCatalogs(); }); }
+  else if (m.type === 'panel_open') { panelOpen = true; panelAt = Date.now(); logLine('panel_open', {}); if (VOICE_OK) send({ type: 'voice_mics' }); Promise.all([refreshAuth(), signedIn.get('local') && syncLocal(), tts().local && speech.checkLocal(), malayalamOn() && refreshMl()]).catch(() => {}).finally(() => { panel(); refreshCatalogs(); }); }
   else if (m.type === 'diagnostics') { shellInfo?.(m); shellInfo = null; }
   else if (m.type === 'panel_closed') { panelOpen = false; logLine('panel_closed', { why: String(m.why ?? ''), ms: Date.now() - panelAt }); }
   else if (m.type === 'panel_key' && typeof m.provider === 'string' && typeof m.key === 'string') {
@@ -2668,6 +2732,11 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     if (storageKeyProvider(id) !== m.provider) return;
     apiKeyLogin(id, m.key.slice(0, 1000)).then(() => panelNote(signedIn.get(m.provider) ? `${label} is connected.` : `That ${label} key didn't work.`, !signedIn.get(m.provider)))
       .catch((e) => { const p = problem('key', e, { store: KEY_STORE }); panelNote(p.text, true, p); });
+  // Where whisper-server and the Malayalam model are (Listening page): saved, then checked, and the panel shows what's wrong.
+  } else if (m.type === 'panel_ml_paths' && typeof m.server === 'string' && typeof m.model === 'string') {
+    const clean = (s) => s.trim().replace(/^"(.*)"$/, '$1').slice(0, 500);
+    config.mlServer = clean(m.server); config.mlModel = clean(m.model); saveConfig(); ears.stop();
+    refreshMl().then(() => { panel(); if (mlStatus.ready) say('Malayalam is set up. Switch the language to Malayalam and talk to me.', 'happy'); });
   } else if (m.type === 'panel_local_add' && typeof m.label === 'string' && typeof m.baseUrl === 'string') {
     addServer({ label: m.label.slice(0, 200), baseUrl: m.baseUrl.slice(0, 500), key: typeof m.key === 'string' ? m.key.trim().slice(0, 1000) : '', images: m.images === true }).catch((e) => console.error('add server', e));
   } else if ((m.type === 'panel_fishkey' || m.type === 'panel_geminikey') && typeof m.key === 'string') voiceKeyLogin({ provider: m.type === 'panel_geminikey' ? 'gemini' : 'fish', given: m.key.slice(0, 1000), note: panelNote }).catch((e) => console.error('voice key', e));

@@ -24,6 +24,14 @@
        words and their ! . , ? sit a normal distance apart instead of a full monospace cell. */
     unicode-range: U+0020-0021, U+0028-0029, U+002C-002E, U+003A-003B, U+003F, U+00A0, U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF, U+200C-200F, U+2010-2011, U+204F;
   }
+  @font-face {
+    font-family: "Roamies Malayalam";
+    src: url("onboarding/fonts/noto-sans-malayalam.woff2") format("woff2");
+    font-weight: 100 900;
+    font-display: swap;
+    /* Malayalam letters only (Noto Sans Malayalam): Martian Mono has none, and the Latin side of every stack stays Martian Mono. */
+    unicode-range: U+0D00-0D7F, U+200C-200D, U+25CC;
+  }
 /* Headings on drawn cards and tickets. */
   @font-face { font-family: "Doto"; src: url("onboarding/fonts/doto.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
   html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
@@ -51,7 +59,7 @@
 <script src="roamies/people.js"></script>
 <script src="roamies/10-dither.js"></script>
 <script src="roamies/12-sidekick.js"></script>
-<script>Roamie.bootDesktop(document.getElementById("stage")); document.fonts.load('500 13px "Martian Mono"'); document.fonts.load('500 13px "Roamies Arabic"', 'م'); document.fonts.load('500 13px "Roamies Arabic RTL"', 'م ');</script>
+<script>Roamie.bootDesktop(document.getElementById("stage")); document.fonts.load('500 13px "Martian Mono"'); document.fonts.load('500 13px "Roamies Arabic"', 'م'); document.fonts.load('500 13px "Roamies Arabic RTL"', 'م '); document.fonts.load('500 13px "Roamies Malayalam"', 'മലയാളം');</script>
 <script src="roamies/ink3d.js"></script>
 <script src="roamies/world.js"></script>
 <script src="roamies/ink.js"></script>

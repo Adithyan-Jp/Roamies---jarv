@@ -795,17 +795,40 @@
     ['es-ES', 'Español · Spanish'], ['fr-FR', 'Français · French'], ['de-DE', 'Deutsch · German'], ['it-IT', 'Italiano · Italian'],
     ['pt-BR', 'Português · Portuguese'], ['ja-JP', '日本語 · Japanese'], ['ko-KR', '한국어 · Korean'], ['zh-CN', '中文 · Chinese'], ['hi-IN', 'हिन्दी · Hindi']];
   const SPEAK_ONLINE = 'This language goes to Apple\'s servers. Add it under Dictation in System Settings to keep it on this Mac.';
-  // The Speak in select, shown on a Mac while voice control is on, with the online hint under it when it applies.
+  // Windows and Linux: the speech model picks among its own languages; Malayalam, which it has none of, is optional and
+  // read by its own engine (malayalam.mjs in the sidecar).
+  const SPEAK_LANGS_PC = [['auto', 'Automatic (English and other European languages)'], ['ml-IN', 'മലയാളം · Malayalam']];
+  const mlDraft = { server: null, model: null }; // what's typed in the two path fields, until Save
+  // Malayalam's engine: on this computer (whisper.cpp, nothing leaves it) or Gemini (the audio goes to Google).
+  function malayalamSetup(v) {
+    const m = v.ml;
+    if (!m) return null;
+    const save = () => { send({ type: 'panel_ml_paths', server: mlDraft.server ?? m.server, model: mlDraft.model ?? m.model }); mlDraft.server = mlDraft.model = null; };
+    const field = (id, key, label, value, placeholder) => el('span', { className: 'px field' }, el('input', {
+      id, value, 'aria-label': label, placeholder, type: 'text', autocomplete: 'off', spellcheck: false, maxLength: 500,
+      on: { input: (e) => { mlDraft[key] = e.target.value; }, keydown: (e) => { if (e.key === 'Enter') save(); } } }));
+    const local = m.engine !== 'gemini';
+    return el('div', { className: 'reveal', 'data-anim': 'mlsetup' },
+      el('p', { className: 'sub', textContent: 'Malayalam engine' }),
+      picks('Malayalam engine', [['local', 'On this computer'], ['gemini', 'Gemini']], local ? 'local' : 'gemini', (x) => act(`mlengine:${x}`), 'mlengine'),
+      el('p', { className: 'why wrap', textContent: local ? 'Runs here with whisper.cpp, so your audio stays on this computer.' : 'Your Malayalam audio goes to Google, using your Gemini key.' }),
+      local ? el('div', { className: 'addserver' },
+        el('div', { className: 'keyform' }, field('ml-server', 'server', 'whisper-server program', mlDraft.server ?? m.server, 'Path to whisper-server.exe')),
+        el('div', { className: 'keyform' }, field('ml-model', 'model', 'Malayalam model', mlDraft.model ?? m.model, 'Path to the Malayalam model (.bin)'), btn('Save', save, { k: 'mlsave' }))) : null,
+      el('p', { className: 'why wrap', role: 'status', textContent: m.ready ? 'Ready for Malayalam.' : (m.note || (local ? 'Not set up yet.' : 'Needs a Gemini key: add one on the Model page.')) }));
+  }
+  // The Speak in select, shown while voice control is on, with the online hint under it on a Mac when it applies.
   function speakPicker(v) {
     const lang = v.lang ?? 'auto';
-    const online = v.langOnline === true || (['ar-SA', 'he-IL'].includes(lang) && v.langOnline == null);
+    const online = v.mac && (v.langOnline === true || (['ar-SA', 'he-IL'].includes(lang) && v.langOnline == null));
     return el('div', { className: 'reveal', 'data-anim': 'speakin' },
       el('p', { className: 'sub', textContent: 'Speak in' }),
-      el('p', { className: 'why wrap', textContent: 'The language you talk to me in.' }),
+      el('p', { className: 'why wrap', textContent: v.mac ? 'The language you talk to me in.' : 'The language you talk to me in. Malayalam is optional.' }),
       el('span', { className: 'px field select' },
         el('select', { 'aria-label': 'Language I speak', 'data-k': 'speechlang', on: { change: (e) => act(`speechlang:${e.target.value}`) } },
-          SPEAK_LANGS.map(([code, label]) => el('option', { value: code, textContent: label, dir: 'auto', selected: code === lang })))),
-      online ? el('p', { className: 'why wrap', role: 'status', textContent: SPEAK_ONLINE }) : null);
+          (v.mac ? SPEAK_LANGS : SPEAK_LANGS_PC).map(([code, label]) => el('option', { value: code, textContent: label, dir: 'auto', selected: code === lang })))),
+      online ? el('p', { className: 'why wrap', role: 'status', textContent: SPEAK_ONLINE }) : null,
+      !v.mac && lang === 'ml-IN' ? malayalamSetup(v) : null);
   }
   // Wayland: the commands to bind to keys in the desktop's settings (no app may hold its own shortcuts there).
   // A command shows only after copying it failed, so it can be copied by hand.
@@ -825,7 +848,7 @@
         v.download && v.download.status !== 'downloading' ? el('div', { className: 'links' }, link(v.download.status === 'error' ? 'Retry the download' : `Download (${v.download.size})`, () => act('voicedl'), { k: 'voicedl' })) : null,
         micPicker(v),
         v.mac ? toggle('Mute Mac while talking', 'Other sounds go quiet while you talk', v.mute, () => act('mutetalk'), 'mutetalk') : null,
-        v.mac && v.on ? speakPicker(v) : null)
+        v.on ? speakPicker(v) : null)
       : group(null, 'When the mic opens without a key.', null,
         toggle('Auto-listen', needs(v.listenEvery ? 'Mic opens after every spoken reply.' : 'Mic opens when I ask you something.'), v.autoListen, () => act('autolisten'), 'autolisten'),
         v.autoListen && v.listenChoices ? el('div', { className: 'reveal', 'data-anim': 'listen-more' },
